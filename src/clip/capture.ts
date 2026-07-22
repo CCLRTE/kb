@@ -1,0 +1,665 @@
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import {
+  acquireBrowser,
+  acquireCookieHttp,
+  acquireCookieRecords,
+  acquireFile,
+  acquireHttp,
+  type AcquiredPage,
+  type AcquisitionMethod,
+} from "./acquire.js";
+import type { CaptureArguments, CaptureScope } from "./args.js";
+import { localizeAssets, sniffImage, type AssetRecord } from "./assets.js";
+import { canonicalizeUrl, chooseBestExtraction, countWords, extractPage, type ExtractedPage, type Platform } from "./extract.js";
+import {
+  buildClipMarkdown,
+  CONTENT_REWRITE_TRUNCATION_WARNING,
+  rewriteContentWithStatus,
+  slugify,
+} from "./lib.js";
+import { filterCookies, renderCookieHeader } from "./cookies.js";
+import { captureMedia, type MediaCaptureResult, type MediaRecord } from "./media.js";
+import {
+  abortCaptureBundle,
+  beginCaptureBundle,
+  commitCaptureBundle,
+  redactSensitiveText,
+  redactSensitiveTextWithCount,
+  writeCaptureBundle,
+  type CaptureBundleTransaction,
+  type CaptureManifest,
+  type CaptureManifestAsset,
+  type CaptureManifestInput,
+} from "./persist.js";
+import { classifyPlatformUrl } from "./platforms.js";
+import { acquirePublicStructured, type PublicStructuredCapture } from "./structured.js";
+
+export type AttemptOutcome = "succeeded" | "failed" | "skipped";
+
+export type CaptureAttempt = {
+  readonly method: string;
+  readonly outcome: AttemptOutcome;
+  readonly message: string;
+};
+
+export type CaptureOutcome = {
+  readonly status: ExtractedPage["status"];
+  readonly sourceUrl: string;
+  readonly canonicalUrl: string;
+  readonly platform: Platform;
+  readonly scope: Exclude<CaptureScope, "auto">;
+  readonly slug: string;
+  readonly acquisitionMethod: AcquisitionMethod;
+  readonly extractor: string;
+  readonly wordCount: number;
+  readonly capturedItems: number;
+  readonly expectedItems: number | null;
+  readonly outputDirectory: string | null;
+  readonly markdownPath: string | null;
+  readonly assetCount: number;
+  readonly warnings: readonly string[];
+  readonly attempts: readonly CaptureAttempt[];
+  readonly markdown: string;
+  readonly manifest: CaptureManifest | null;
+};
+
+export type CaptureDependencies = {
+  readonly acquireFile?: typeof acquireFile;
+  readonly acquireHttp?: typeof acquireHttp;
+  readonly acquireCookieHttp?: typeof acquireCookieHttp;
+  readonly acquireCookieRecords?: typeof acquireCookieRecords;
+  readonly acquireBrowser?: typeof acquireBrowser;
+  readonly acquirePublicStructured?: typeof acquirePublicStructured;
+  readonly extractPage?: typeof extractPage;
+  readonly localizeAssets?: typeof localizeAssets;
+  readonly captureMedia?: typeof captureMedia;
+  readonly now?: () => Date;
+};
+
+const browserFirstPlatforms = new Set<Platform>([
+  "x",
+  "instagram",
+  "linkedin",
+  "reddit",
+  "facebook",
+  "tiktok",
+  "threads",
+  "whatsapp",
+  "youtube",
+]);
+
+/** Resolve `auto` to the useful default for each content family. */
+export function effectiveScope(platform: Platform, scope: CaptureScope): Exclude<CaptureScope, "auto"> {
+  if (scope !== "auto") return scope;
+  if (platform === "hacker-news" || platform === "reddit") return "comments";
+  if (platform === "x" || platform === "bluesky") return "thread";
+  return "page";
+}
+
+function stableContentId(url: URL): string | null {
+  const classified = classifyPlatformUrl(url.href);
+  if (classified === null) return null;
+  switch (classified.platform) {
+    case "x":
+    case "bluesky":
+      return classified.postId;
+    case "hacker-news":
+      return classified.itemId;
+    case "reddit":
+      return classified.commentId ?? classified.postId;
+    case "instagram":
+    case "linkedin":
+    case "facebook":
+    case "tiktok":
+    case "threads":
+    case "whatsapp":
+    case "youtube":
+      return classified.contentId;
+    case "substack":
+    case "generic":
+      return null;
+  }
+}
+
+/** Prefer readable slugs while retaining stable social IDs to prevent collisions. */
+export function captureSlug(options: CaptureArguments, extraction: ExtractedPage): string {
+  if (options.slug !== undefined) return slugify(options.slug);
+  const fallback = extraction.canonicalUrl.pathname.split("/").filter(Boolean).at(-1)
+    ?? extraction.canonicalUrl.hostname;
+  const base = slugify(extraction.article.title ?? fallback);
+  const id = stableContentId(extraction.canonicalUrl);
+  if (id === null) return base;
+  const idSlug = slugify(id);
+  if (idSlug === "" || base.endsWith(`-${idSlug}`) || base === idSlug) return base;
+  const available = Math.max(1, 80 - [...idSlug].length - 1);
+  const shortened = [...base].slice(0, available).join("").replace(/-+$/g, "") || "post";
+  return `${shortened}-${idSlug}`;
+}
+
+function shouldUseBrowser(
+  options: CaptureArguments,
+  platform: Platform,
+  scope: Exclude<CaptureScope, "auto">,
+  directCandidates: readonly ExtractedPage[],
+): boolean {
+  if (options.mode === "browser") return true;
+  if (options.mode !== "auto") return false;
+  if (options.browserProfile !== undefined || options.browserLive || options.cdp !== undefined) return true;
+  if (options.evidence === "screenshot" || options.evidence === "all") return true;
+  if (browserFirstPlatforms.has(platform)) return true;
+  if (scope !== "page" && platform !== "hacker-news" && platform !== "bluesky") return true;
+  const boundedStructured = directCandidates.some((candidate) =>
+    (candidate.acquisition.method === "hacker-news-api" || candidate.acquisition.method === "bluesky-api")
+    && candidate.warnings.some((warning) => (
+      /configured (?:item|depth)|item (?:or depth )?limit|depth limit|capture stopped at \d+ items?/i.test(warning)
+    )));
+  if (boundedStructured) return false;
+  const best = chooseBestExtraction(directCandidates);
+  return best === null || best.status !== "complete" || best.wordCount < 60;
+}
+
+function safeAttemptMessage(value: unknown): string {
+  const message = value instanceof Error ? value.message : String(value);
+  return redactSensitiveText(message).replace(/[\r\n]+/g, " ").slice(0, 1_000);
+}
+
+function finalizedWarnings(values: readonly string[], markdownRedactions = 0): readonly string[] {
+  const sanitized = values.map((value) => safeAttemptMessage(value));
+  if (markdownRedactions > 0) {
+    sanitized.push(
+      `Redacted ${markdownRedactions} credential-shaped occurrence${markdownRedactions === 1 ? "" : "s"} from captured Markdown.`,
+    );
+  }
+  return [...new Set(sanitized)];
+}
+
+function statusAfterContentRewrite(
+  status: ExtractedPage["status"],
+  truncated: boolean,
+): ExtractedPage["status"] {
+  return truncated && status === "complete" ? "partial" : status;
+}
+
+function chooseCaptureExtraction(
+  candidates: readonly ExtractedPage[],
+  structuredCapture: PublicStructuredCapture | null,
+): ExtractedPage | null {
+  const structured = structuredCapture?.extraction;
+  if (
+    structured !== undefined
+    && (structured.acquisition.method === "hacker-news-api" || structured.acquisition.method === "bluesky-api")
+    && (structured.status === "complete" || structured.status === "partial")
+  ) {
+    // These official adapters preserve bounded, typed reply structure. A large
+    // rendered shell can contain more words while proving zero conversation
+    // items, so volume must not displace the authoritative bounded result.
+    return structured;
+  }
+  return chooseBestExtraction(candidates);
+}
+
+async function tryAcquisition(
+  method: string,
+  acquire: () => Promise<AcquiredPage>,
+  scope: CaptureScope,
+  timeoutMs: number,
+  extractor: typeof extractPage,
+  candidates: ExtractedPage[],
+  attempts: CaptureAttempt[],
+): Promise<AcquiredPage | null> {
+  try {
+    const acquisition = await acquire();
+    const extracted = await extractor(acquisition, scope, timeoutMs);
+    if (extracted === null) {
+      attempts.push({ method, outcome: "failed", message: "acquisition yielded no extractable content" });
+      return acquisition;
+    }
+    candidates.push(extracted);
+    attempts.push({
+      method: acquisition.method,
+      outcome: "succeeded",
+      message: `${extracted.status}; ${extracted.wordCount} words; ${extracted.capturedItems} items`,
+    });
+    return acquisition;
+  } catch (error) {
+    attempts.push({ method, outcome: "failed", message: safeAttemptMessage(error) });
+    return null;
+  }
+}
+
+function screenshotIntoBundle(
+  screenshotPath: string | null,
+  transaction: CaptureBundleTransaction,
+  maxBytes: number,
+): string | null {
+  if (screenshotPath === null || !existsSync(screenshotPath)) return null;
+  const stats = statSync(screenshotPath);
+  if (!stats.isFile() || stats.size > maxBytes) return null;
+  const bytes = readFileSync(screenshotPath);
+  if (sniffImage(bytes)?.mimeType !== "image/png") return null;
+  const evidenceDirectory = join(transaction.stagingDirectory, "evidence");
+  mkdirSync(evidenceDirectory, { recursive: true, mode: 0o700 });
+  const destination = join(evidenceDirectory, "page.png");
+  copyFileSync(screenshotPath, destination);
+  chmodSync(destination, 0o600);
+  return "evidence/page.png";
+}
+
+const mediaManifestAssets = (
+  result: MediaCaptureResult,
+  sourceUrl: string,
+): readonly CaptureManifestAsset[] => result.records.map((record) => ({
+  source: sourceUrl,
+  url: sourceUrl,
+  path: record.path,
+  mimeType: record.mimeType,
+  bytes: record.bytes,
+  sha256: record.sha256,
+}));
+
+function safeMediaPath(path: string): string | null {
+  if (path === "" || path.startsWith("/") || /[\\\0\r\n?#]/.test(path)) return null;
+  const pieces = path.split("/");
+  if (pieces.some((piece) => piece === "" || piece === "." || piece === "..")) return null;
+  return pieces.map((piece) => encodeURIComponent(piece)).join("/");
+}
+
+/** Add playable local media to the note; image-only captures never call this path. */
+export function appendCapturedMedia(content: string, records: readonly MediaRecord[]): string {
+  const lines: string[] = [];
+  for (const record of records) {
+    const path = safeMediaPath(record.path);
+    if (path === null) continue;
+    if (record.mimeType.startsWith("video/")) {
+      lines.push(`<video controls preload="metadata" src="${path}"></video>`, `[Download video](${path})`);
+    } else if (record.mimeType.startsWith("audio/")) {
+      lines.push(`<audio controls preload="metadata" src="${path}"></audio>`, `[Download audio](${path})`);
+    } else lines.push(`[Download media](${path})`);
+  }
+  if (lines.length === 0) return content;
+  return `${content.trimEnd()}\n\n## Media\n\n${lines.join("\n\n")}\n`;
+}
+
+function cookieMediaOptions(options: CaptureArguments): {
+  readonly cookieBrowser?: { readonly source: "chrome" | "arc" | "brave" | "chromium" | "edge" | "firefox" | "safari"; readonly profile?: string };
+  readonly cookiesFile?: string;
+} {
+  const source = options.cookieSources[0] ?? (options.browserProfile === undefined ? undefined : "chrome");
+  const profile = options.cookieSources.length > 0 ? options.cookieProfile : options.browserProfile;
+  return {
+    ...(source === undefined
+      ? {}
+      : { cookieBrowser: { source, ...(profile === undefined ? {} : { profile }) } }),
+    ...(options.cookiesFile === undefined ? {} : { cookiesFile: options.cookiesFile }),
+  };
+}
+
+function assetCookieProvider(
+  options: CaptureArguments,
+  reader: typeof acquireCookieRecords,
+  authorizedUrl: URL,
+): ((url: URL) => Promise<string | null>) | undefined {
+  const explicit = options.cookieSources.length > 0 || options.cookiesFile !== undefined;
+  if (!explicit && options.browserProfile === undefined) return undefined;
+  const effective = explicit
+    ? options
+    : { ...options, cookieSources: ["chrome"] as const, cookieProfile: options.browserProfile };
+  let records: ReturnType<typeof reader> | undefined;
+  return (url) => {
+    if (url.origin !== authorizedUrl.origin) return Promise.resolve(null);
+    // Read once against the captured page, then narrow the retained records again
+    // for each asset path. Attribute-less headers can never be reinterpreted as Path=/.
+    records ??= reader(effective, authorizedUrl);
+    return records.then((result) => {
+      const header = renderCookieHeader(filterCookies(result.cookies, url).cookies);
+      return header === "" ? null : header;
+    });
+  };
+}
+
+/** Run the layered acquisition pipeline and optionally persist one atomic capture bundle. */
+export async function runCapture(
+  rawOptions: CaptureArguments,
+  dependencies: CaptureDependencies = {},
+): Promise<CaptureOutcome> {
+  if (rawOptions.stdout && (rawOptions.media !== "none" || rawOptions.evidence !== "none")) {
+    throw new Error("stdout capture cannot request persisted media or evidence");
+  }
+  const deps = {
+    acquireFile: dependencies.acquireFile ?? acquireFile,
+    acquireHttp: dependencies.acquireHttp ?? acquireHttp,
+    acquireCookieHttp: dependencies.acquireCookieHttp ?? acquireCookieHttp,
+    acquireCookieRecords: dependencies.acquireCookieRecords ?? acquireCookieRecords,
+    acquireBrowser: dependencies.acquireBrowser ?? acquireBrowser,
+    acquirePublicStructured: dependencies.acquirePublicStructured ?? acquirePublicStructured,
+    extractPage: dependencies.extractPage ?? extractPage,
+    localizeAssets: dependencies.localizeAssets ?? localizeAssets,
+    captureMedia: dependencies.captureMedia ?? captureMedia,
+    now: dependencies.now ?? (() => new Date()),
+  };
+  const platform: Platform = classifyPlatformUrl(rawOptions.url.href)?.platform ?? "generic";
+  const sourceUrl = canonicalizeUrl(rawOptions.url, platform).href;
+  const scope = effectiveScope(platform, rawOptions.scope);
+  const options: CaptureArguments = { ...rawOptions, scope };
+  const candidates: ExtractedPage[] = [];
+  const attempts: CaptureAttempt[] = [];
+  const browserOperationalWarnings: string[] = [];
+  let structuredCapture: PublicStructuredCapture | null = null;
+  const browserScreenshots = new Map<AcquiredPage, string>();
+  const browserTemporaryDirectory = mkdtempSync(join(tmpdir(), "cclrte-kb-browser-"));
+  chmodSync(browserTemporaryDirectory, 0o700);
+
+  try {
+    const eagerBrowserCandidates: ExtractedPage[] = [];
+    const eagerBrowserAttempts: CaptureAttempt[] = [];
+    const eagerBrowserRequested = options.mode === "auto" && browserFirstPlatforms.has(platform);
+    if (eagerBrowserRequested && (options.browserLive || options.cdp !== undefined)) {
+      browserOperationalWarnings.push(
+        "An attached browser attempt may have navigated, clicked eligible disclosure controls, and scrolled the active tab even if that candidate was not selected.",
+      );
+    } else if (
+      eagerBrowserRequested
+      && options.browserProfile !== undefined
+      && options.browserProfileOwnership !== "owned"
+    ) {
+      browserOperationalWarnings.push(
+        "A selected browser profile was exercised even if that candidate was not selected; a path-backed persistent profile may have been updated by page activity.",
+      );
+    }
+    const eagerBrowser = eagerBrowserRequested
+      ? tryAcquisition(
+          options.browserLive ? "browser-live" : options.cdp === undefined ? "browser" : "browser-cdp",
+          () => deps.acquireBrowser(options, browserTemporaryDirectory, false),
+          scope,
+          options.timeoutMs,
+          deps.extractPage,
+          eagerBrowserCandidates,
+          eagerBrowserAttempts,
+        )
+      : null;
+    if (options.mode === "file") {
+      await tryAcquisition("file", () => deps.acquireFile(options), scope, options.timeoutMs, deps.extractPage, candidates, attempts);
+    } else {
+      if (options.mode === "auto" || options.mode === "http") {
+        try {
+          structuredCapture = await deps.acquirePublicStructured(options);
+          if (structuredCapture !== null) {
+            candidates.push(structuredCapture.extraction);
+            attempts.push({
+              method: structuredCapture.extraction.acquisition.method,
+              outcome: "succeeded",
+              message: `${structuredCapture.extraction.status}; ${structuredCapture.extraction.capturedItems} items`,
+            });
+          } else {
+            attempts.push({ method: "public-api", outcome: "skipped", message: "no stable public structured adapter" });
+          }
+        } catch (error) {
+          attempts.push({ method: "public-api", outcome: "failed", message: safeAttemptMessage(error) });
+        }
+        await tryAcquisition("http", () => deps.acquireHttp(options), scope, options.timeoutMs, deps.extractPage, candidates, attempts);
+        if (options.cookieSources.length > 0 || options.cookiesFile !== undefined) {
+          await tryAcquisition(
+            "cookie-http",
+            () => deps.acquireCookieHttp(options),
+            scope,
+            options.timeoutMs,
+            deps.extractPage,
+            candidates,
+            attempts,
+          );
+        }
+      }
+
+      if (eagerBrowser !== null) {
+        const browser = await eagerBrowser;
+        candidates.push(...eagerBrowserCandidates);
+        attempts.push(...eagerBrowserAttempts);
+        if (browser !== null) browserOperationalWarnings.push(...browser.warnings);
+        if (browser?.screenshotPath !== undefined) browserScreenshots.set(browser, browser.screenshotPath);
+      } else if (shouldUseBrowser(options, platform, scope, candidates)) {
+        if (options.browserLive || options.cdp !== undefined) {
+          browserOperationalWarnings.push(
+            "An attached browser attempt may have navigated, clicked eligible disclosure controls, and scrolled the active tab even if that candidate was not selected.",
+          );
+        } else if (
+          options.browserProfile !== undefined
+          && options.browserProfileOwnership !== "owned"
+        ) {
+          browserOperationalWarnings.push(
+            "A selected browser profile was exercised even if that candidate was not selected; a path-backed persistent profile may have been updated by page activity.",
+          );
+        }
+        const browser = await tryAcquisition(
+          options.browserLive ? "browser-live" : options.cdp === undefined ? "browser" : "browser-cdp",
+          () => deps.acquireBrowser(options, browserTemporaryDirectory, false),
+          scope,
+          options.timeoutMs,
+          deps.extractPage,
+          candidates,
+          attempts,
+        );
+        if (browser !== null) browserOperationalWarnings.push(...browser.warnings);
+        if (browser?.screenshotPath !== undefined) browserScreenshots.set(browser, browser.screenshotPath);
+      }
+    }
+
+    const best = chooseCaptureExtraction(candidates, structuredCapture);
+    if (best === null) {
+      const details = attempts.filter(({ outcome }) => outcome === "failed").map(({ method, message }) => `${method}: ${message}`);
+      throw new Error(`no acquisition produced usable content${details.length === 0 ? "" : ` (${details.join("; ")})`}`);
+    }
+    const slug = captureSlug(options, best);
+    if (slug === "") {
+      throw new Error(options.slug === undefined
+        ? "could not derive a safe slug; pass one after the URL"
+        : `slug ${JSON.stringify(options.slug)} contains no letters or digits`);
+    }
+
+    const capturedAt = deps.now().toISOString();
+    const attemptWarnings = attempts
+      .filter(({ outcome }) => outcome === "failed")
+      .map(({ method, message }) => `${method} attempt failed: ${message}`);
+    const warnings = [...new Set([...best.warnings, ...browserOperationalWarnings, ...attemptWarnings])];
+
+    if (options.stdout) {
+      const rewritten = rewriteContentWithStatus(best.article.content, best.canonicalUrl, new Map());
+      const status = statusAfterContentRewrite(best.status, rewritten.truncated);
+      const redactedMarkdown = redactSensitiveTextWithCount(buildClipMarkdown(best.article, {
+        slug,
+        sourceHref: best.canonicalUrl.href,
+        clipped: capturedAt.slice(0, 10),
+        content: rewritten.content,
+        platform: best.platform,
+        captureStatus: status,
+        captureMethod: best.acquisition.method,
+        captureScope: scope,
+      }));
+      const wordCount = countWords(redactedMarkdown.text);
+      return {
+        status,
+        sourceUrl,
+        canonicalUrl: best.canonicalUrl.href,
+        platform: best.platform,
+        scope,
+        slug,
+        acquisitionMethod: best.acquisition.method,
+        extractor: best.extractor,
+        wordCount,
+        capturedItems: best.capturedItems,
+        expectedItems: best.expectedItems,
+        outputDirectory: null,
+        markdownPath: null,
+        assetCount: 0,
+        warnings: finalizedWarnings([
+          ...warnings,
+          ...(rewritten.truncated ? [CONTENT_REWRITE_TRUNCATION_WARNING] : []),
+        ], redactedMarkdown.count),
+        attempts,
+        markdown: redactedMarkdown.text,
+        manifest: null,
+      };
+    }
+
+    const transaction = beginCaptureBundle({ outputRoot: options.outputBase, slug, force: options.force });
+    try {
+      const imageCookieProvider = assetCookieProvider(options, deps.acquireCookieRecords, best.canonicalUrl);
+      const localized = options.media === "none"
+        ? {
+            ...rewriteContentWithStatus(best.article.content, best.canonicalUrl, new Map()),
+            assets: [] as readonly AssetRecord[],
+            warnings: [] as readonly string[],
+          }
+        : await deps.localizeAssets(best.article.content, {
+            assetsDirectory: transaction.assetsDirectory,
+            baseUrl: best.canonicalUrl,
+            userAgent: options.userAgent,
+            timeoutMs: options.timeoutMs,
+            maxAssetBytes: options.maxAssetBytes,
+            maxTotalAssetBytes: options.maxTotalAssetBytes,
+            allowPrivateNetwork: options.allowPrivateNetwork,
+            ...(imageCookieProvider === undefined ? {} : { cookieHeaderProvider: imageCookieProvider }),
+          });
+      const combinedWarnings = [
+        ...warnings,
+        ...localized.warnings,
+        ...(localized.truncated ? [CONTENT_REWRITE_TRUNCATION_WARNING] : []),
+      ];
+      const status = statusAfterContentRewrite(best.status, localized.truncated);
+      const manifestAssets: CaptureManifestAsset[] = [...localized.assets];
+      let mediaRecords: readonly MediaRecord[] = [];
+      let mediaStatus: CaptureManifestInput["artifacts"]["media"]["status"] = "not-requested";
+      if (options.media === "all") {
+        const usedBytes = localized.assets.reduce((sum, asset) => sum + asset.bytes, 0);
+        const remainingBytes = Math.max(1, options.maxTotalAssetBytes - usedBytes);
+        const media = await deps.captureMedia({
+          url: best.canonicalUrl,
+          outputDirectory: join(transaction.assetsDirectory, "media"),
+          relativePrefix: "assets/media",
+          timeoutMs: options.timeoutMs,
+          maxFileBytes: Math.min(options.maxAssetBytes, remainingBytes),
+          maxTotalBytes: remainingBytes,
+          allowPrivateNetwork: options.allowPrivateNetwork,
+          maxFiles: Math.min(options.maxItems, 100),
+          userAgent: options.userAgent,
+          ...cookieMediaOptions(options),
+        });
+        mediaStatus = media.status === "captured" && media.warnings.length > 0 ? "partial" : media.status;
+        mediaRecords = media.records;
+        manifestAssets.push(...mediaManifestAssets(media, best.canonicalUrl.href));
+        combinedWarnings.push(...media.warnings);
+      }
+
+      const requestedScreenshot = options.evidence === "screenshot" || options.evidence === "all";
+      const selectedScreenshot = browserScreenshots.get(best.acquisition) ?? null;
+      const screenshotPath = requestedScreenshot
+        ? screenshotIntoBundle(selectedScreenshot, transaction, options.maxAssetBytes)
+        : null;
+      if (requestedScreenshot && screenshotPath === null) {
+        combinedWarnings.push(
+          browserScreenshots.size > 0
+            ? "A screenshot was captured for a different acquisition candidate, so it was not attached to the selected content."
+            : "A screenshot was requested but no valid bounded PNG was captured.",
+        );
+      }
+      const redactedMarkdown = redactSensitiveTextWithCount(buildClipMarkdown(best.article, {
+        slug,
+        sourceHref: best.canonicalUrl.href,
+        clipped: capturedAt.slice(0, 10),
+        content: appendCapturedMedia(localized.content, mediaRecords),
+        platform: best.platform,
+        captureStatus: status,
+        captureMethod: best.acquisition.method,
+        captureScope: scope,
+      }));
+      const wordCount = countWords(redactedMarkdown.text);
+      const finalWarnings = finalizedWarnings(combinedWarnings, redactedMarkdown.count);
+      const includeSource = options.evidence === "source" || options.evidence === "all";
+      const manifestInput: CaptureManifestInput = {
+        sourceUrl,
+        canonicalUrl: best.canonicalUrl.href,
+        capturedAt,
+        platform: best.platform,
+        status,
+        scope,
+        acquisition: {
+          method: best.acquisition.method,
+          finalUrl: canonicalizeUrl(best.acquisition.finalUrl, best.platform).href,
+          contentType: best.acquisition.contentType,
+        },
+        extraction: {
+          extractor: best.extractor,
+          score: best.score,
+          wordCount,
+          capturedItems: best.capturedItems,
+          expectedItems: best.expectedItems,
+        },
+        attempts,
+        assets: manifestAssets,
+        artifacts: {
+          images: {
+            requested: options.media !== "none",
+            status: options.media === "none"
+              ? "not-requested"
+              : localized.truncated || localized.warnings.length > 0 ? "partial" : "captured",
+            files: localized.assets.length,
+          },
+          media: {
+            requested: options.media === "all",
+            status: mediaStatus,
+            files: mediaRecords.length,
+          },
+        },
+        evidence: {
+          requested: options.evidence,
+          screenshotPath,
+          screenshotStatus: requestedScreenshot ? screenshotPath === null ? "unavailable" : "captured" : "not-requested",
+          sourceHtmlStatus: includeSource ? "captured" : "not-requested",
+        },
+        warnings: finalWarnings,
+      };
+      const manifest = writeCaptureBundle(transaction, {
+        markdown: redactedMarkdown.text,
+        manifest: manifestInput,
+        ...(includeSource ? { sourceHtml: best.acquisition.sourceEvidence ?? best.acquisition.body } : {}),
+      });
+      const outputDirectory = commitCaptureBundle(transaction);
+      return {
+        status,
+        sourceUrl,
+        canonicalUrl: best.canonicalUrl.href,
+        platform: best.platform,
+        scope,
+        slug,
+        acquisitionMethod: best.acquisition.method,
+        extractor: best.extractor,
+        wordCount,
+        capturedItems: best.capturedItems,
+        expectedItems: best.expectedItems,
+        outputDirectory,
+        markdownPath: join(outputDirectory, `${slug}.md`),
+        assetCount: manifestAssets.length,
+        warnings: finalWarnings,
+        attempts,
+        markdown: redactedMarkdown.text,
+        manifest,
+      };
+    } catch (error) {
+      abortCaptureBundle(transaction);
+      throw error;
+    }
+  } finally {
+    rmSync(browserTemporaryDirectory, { recursive: true, force: true });
+  }
+}

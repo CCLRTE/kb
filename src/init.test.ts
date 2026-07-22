@@ -1,0 +1,46 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { initVault } from "./init.js";
+import { scanVault } from "./vault.js";
+
+const roots: string[] = [];
+
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+describe("vault initialization", () => {
+  test("creates an agent-ready empty vault that passes graph checks", async () => {
+    const parent = mkdtempSync(join(tmpdir(), "cclrte-kb-init-test-"));
+    roots.push(parent);
+    const root = join(parent, "knowledge");
+    const result = await initVault(root);
+    const scanned = await scanVault(root);
+
+    expect(result.files).toContain("articles/AGENTS.md");
+    expect(result.files).toContain("index.md");
+    expect(scanned.index).toBe("current");
+    expect(scanned.analysis.noteCount).toBe(0);
+    expect(scanned.analysis.issues).toEqual([]);
+    expect(readFileSync(join(root, "AGENTS.md"), "utf8")).toContain("# Guidelines");
+  });
+
+  test("refuses to merge into an existing directory", async () => {
+    const parent = mkdtempSync(join(tmpdir(), "cclrte-kb-init-existing-test-"));
+    roots.push(parent);
+    const root = join(parent, "knowledge");
+    await initVault(root);
+
+    let rejected = false;
+    try {
+      await initVault(root);
+    } catch {
+      rejected = true;
+    }
+    expect(rejected).toBe(true);
+    expect(existsSync(join(root, "index.md"))).toBe(true);
+  });
+});
