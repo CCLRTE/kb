@@ -1079,6 +1079,9 @@ async function acquireBrowser(options, temporaryDirectory, useDiscoveredProfile 
   const isolation = createAgentBrowserIsolation(temporaryDirectory);
   try {
     const globalArgs = ["--config", isolation.configPath, "--session", session];
+    if (options.browserExecutable !== undefined) {
+      globalArgs.push("--executable-path", options.browserExecutable);
+    }
     let method = "browser-fresh";
     let ownsBrowser = true;
     if (options.cdp !== undefined) {

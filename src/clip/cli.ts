@@ -52,6 +52,8 @@ export type ClipRuntimeOptions = {
     readonly path: string;
     readonly profileDirectory?: "Default";
   };
+  /** Trusted embedding hint; never parsed from public CLI arguments. */
+  readonly browserExecutable?: string;
 };
 
 export function captureSummary(outcome: CaptureOutcome): Record<string, unknown> {
@@ -139,10 +141,18 @@ export async function main(
       throw new Error("owned browser-profile execution does not match the selected private profile path");
     }
     const captureArguments = runtimeOptions.ownedBrowserProfile === undefined
-      ? arguments_
+      ? {
+          ...arguments_,
+          ...(runtimeOptions.browserExecutable === undefined
+            ? {}
+            : { browserExecutable: runtimeOptions.browserExecutable }),
+        }
       : {
           ...arguments_,
           browserProfileOwnership: "owned" as const,
+          ...(runtimeOptions.browserExecutable === undefined
+            ? {}
+            : { browserExecutable: runtimeOptions.browserExecutable }),
           ...(runtimeOptions.ownedBrowserProfile.profileDirectory === undefined
             ? {}
             : { browserProfileDirectory: runtimeOptions.ownedBrowserProfile.profileDirectory }),

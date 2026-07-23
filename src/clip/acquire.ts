@@ -807,6 +807,9 @@ export async function acquireBrowser(
   const isolation = createAgentBrowserIsolation(temporaryDirectory);
   try {
     const globalArgs = ["--config", isolation.configPath, "--session", session];
+    if (options.browserExecutable !== undefined) {
+      globalArgs.push("--executable-path", options.browserExecutable);
+    }
     let method: AcquisitionMethod = "browser-fresh";
     let ownsBrowser = true;
 

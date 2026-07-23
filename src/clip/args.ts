@@ -34,6 +34,8 @@ export type CaptureArguments = {
   readonly browserProfileOwnership?: "borrowed" | "owned";
   /** Internal Chromium profile selection inside an owned user-data clone. */
   readonly browserProfileDirectory?: "Default";
+  /** Trusted embedding contract: exact browser binary paired with the selected profile. */
+  readonly browserExecutable?: string;
   readonly browserLive: boolean;
   readonly cdp: string | undefined;
   readonly cookieSources: readonly CookieSource[];

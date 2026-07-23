@@ -15,7 +15,7 @@ import {
   inspectClipEnvironment,
   renderAdapterCapabilities,
   renderDoctorReport
-} from "./index-5d28nw2v.js";
+} from "./index-3t4ef3h7.js";
 import {
   MAX_COOKIE_BYTES,
   acquireBrowser,
@@ -29,7 +29,7 @@ import {
   readCookieFile,
   renderCookieHeader,
   renderNetscapeCookieJar
-} from "./index-t0860ffg.js";
+} from "./index-yhcj5308.js";
 import {
   startNetworkProxy
 } from "./index-k4cczfgz.js";
@@ -2319,9 +2319,13 @@ ${sanitizeTerminalText(usage)}`);
     if (runtimeOptions.ownedBrowserProfile !== undefined && arguments_.browserProfile !== runtimeOptions.ownedBrowserProfile.path) {
       throw new Error("owned browser-profile execution does not match the selected private profile path");
     }
-    const captureArguments = runtimeOptions.ownedBrowserProfile === undefined ? arguments_ : {
+    const captureArguments = runtimeOptions.ownedBrowserProfile === undefined ? {
+      ...arguments_,
+      ...runtimeOptions.browserExecutable === undefined ? {} : { browserExecutable: runtimeOptions.browserExecutable }
+    } : {
       ...arguments_,
       browserProfileOwnership: "owned",
+      ...runtimeOptions.browserExecutable === undefined ? {} : { browserExecutable: runtimeOptions.browserExecutable },
       ...runtimeOptions.ownedBrowserProfile.profileDirectory === undefined ? {} : { browserProfileDirectory: runtimeOptions.ownedBrowserProfile.profileDirectory }
     };
     const outcome = await (dependencies.runCapture ?? runCapture)(captureArguments);

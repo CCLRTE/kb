@@ -136,13 +136,17 @@ describe("clip CLI", () => {
           return Promise.resolve(outcome("partial"));
         },
       },
-      { ownedBrowserProfile: { path: "/private/owned-profile", profileDirectory: "Default" } },
+      {
+        browserExecutable: "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ownedBrowserProfile: { path: "/private/owned-profile", profileDirectory: "Default" },
+      },
     );
     expect(code).toBe(0);
     expect(observed).toMatchObject({
       browserProfile: "/private/owned-profile",
       browserProfileOwnership: "owned",
       browserProfileDirectory: "Default",
+      browserExecutable: "/Applications/Chromium.app/Contents/MacOS/Chromium",
     });
 
     let publicObserved: unknown;
