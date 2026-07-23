@@ -6,7 +6,7 @@ import {
   extractPage,
   localizeAssets,
   sniffImage
-} from "./index-tcnqv6w8.js";
+} from "./index-809x6ffw.js";
 import {
   cloneBrowserProfile
 } from "./index-k3pqw1a7.js";
@@ -15,7 +15,7 @@ import {
   inspectClipEnvironment,
   renderAdapterCapabilities,
   renderDoctorReport
-} from "./index-mz08nz1e.js";
+} from "./index-4t9w7nzv.js";
 import {
   MAX_COOKIE_BYTES,
   acquireBrowser,
@@ -29,7 +29,7 @@ import {
   readCookieFile,
   renderCookieHeader,
   renderNetscapeCookieJar
-} from "./index-c1dx8x7c.js";
+} from "./index-n7dy660d.js";
 import {
   startNetworkProxy
 } from "./index-k4cczfgz.js";
@@ -43,7 +43,7 @@ import {
   renderCapturedDocument,
   rewriteContentWithStatus,
   slugify
-} from "./index-k5h9erpt.js";
+} from "./index-hgve9rh2.js";
 import {
   decodeBytes,
   safeFetch
@@ -56,11 +56,11 @@ import {
   redactSensitiveTextWithCount,
   sanitizeArtifactUrl,
   writeCaptureBundle
-} from "./index-f49xpe9k.js";
+} from "./index-ey9rycsn.js";
 import {
   sanitizeTerminalLine,
   sanitizeTerminalText
-} from "./index-q32a8bfd.js";
+} from "./index-1xxnjn0d.js";
 import {
   captureUrl,
   parseArguments,

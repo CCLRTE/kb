@@ -92,6 +92,52 @@ describe("Defuddle extraction", () => {
     expect(retained).toContain("https://i.ytimg.com/vi/video/hqdefault.jpg");
   });
 
+  test("runs the X extractor in a Bun worker with DOM Node position constants", async () => {
+    const worker = new Worker(defuddleWorkerUrl().href, { type: "module" });
+    try {
+      const html = `<!doctype html><html><body>
+        <main aria-label="Timeline: Conversation">
+          <div data-testid="cellInnerDiv"><article data-testid="tweet">
+            <div data-testid="User-Name"><a href="/alice">Alice</a><a href="/alice">@alice</a></div>
+            <div data-testid="tweetText">Root post</div>
+            <a href="/alice/status/123"><time datetime="2026-07-22T12:00:00.000Z"></time></a>
+          </article></div>
+          <div data-testid="cellInnerDiv"><article data-testid="tweet">
+            <div data-testid="User-Name"><a href="/bob">Bob</a><a href="/bob">@bob</a></div>
+            <div data-testid="tweetText">Direct reply</div>
+            <a href="/bob/status/124"><time datetime="2026-07-22T12:01:00.000Z"></time></a>
+          </article></div>
+        </main>
+      </body></html>`;
+      const result = await new Promise<Record<string, unknown>>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Defuddle worker fixture timed out")), 5_000);
+        worker.onmessage = (event: MessageEvent<unknown>): void => {
+          clearTimeout(timeout);
+          if (typeof event.data !== "object" || event.data === null || !("ok" in event.data) || event.data.ok !== true
+            || !("value" in event.data) || typeof event.data.value !== "object" || event.data.value === null) {
+            reject(new Error("Defuddle worker fixture failed"));
+            return;
+          }
+          resolve(event.data.value as Record<string, unknown>);
+        };
+        worker.onerror = () => {
+          clearTimeout(timeout);
+          reject(new Error("Defuddle worker fixture crashed"));
+        };
+        worker.postMessage({
+          html,
+          url: "https://x.com/alice/status/123",
+          includeReplies: true,
+        });
+      });
+      expect(result.extractorType).toBe("twitter");
+      expect(result.content).toContain("Root post");
+      expect(result.content).toContain("Direct reply");
+    } finally {
+      worker.terminate();
+    }
+  });
+
   test("restores deliberate X post line breaks from the extractor description", () => {
     const flattened = "Header\n\nagent-browser supports this natively agent-browser network har start # browse agent-browser network har stop\n\nQuote";
     const description = "agent-browser supports this natively\n\nagent-browser network har start\n# browse\nagent-browser network har stop";

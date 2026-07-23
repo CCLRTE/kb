@@ -4,7 +4,7 @@ import {
 } from "./index-k4cczfgz.js";
 import {
   classifyPlatformUrl
-} from "./index-k5h9erpt.js";
+} from "./index-hgve9rh2.js";
 import {
   assertSafeNetworkUrl,
   decodeBytes,
@@ -12,7 +12,7 @@ import {
 } from "./index-kvxzb85x.js";
 import {
   sanitizeArtifactUrl
-} from "./index-f49xpe9k.js";
+} from "./index-ey9rycsn.js";
 import {
   captureUrl
 } from "./index-6g2pv9d2.js";
@@ -43,6 +43,7 @@ var MAX_COOKIE_RECORDS = 4096;
 var MAX_COOKIE_BYTES = 2 * 1024 * 1024;
 var cookieNamePattern = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 var cookieValuePattern = /^[\x21\x23-\x2B\x2D-\x3A\x3C-\x5B\x5D-\x7E]*$/;
+var quotedCookieValuePattern = /^"[\x21\x23-\x2B\x2D-\x3A\x3C-\x5B\x5D-\x7E]*"$/;
 var cookieDomainPattern = /^[a-z0-9.-]+$/i;
 var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 var isUnknownArray = (value) => Array.isArray(value);
@@ -179,7 +180,7 @@ function validatedCookie(value, target, nowSeconds) {
     return null;
   if (typeof value.name !== "string" || value.name.length > 1024 || !cookieNamePattern.test(value.name))
     return null;
-  if (typeof value.value !== "string" || value.value.length > 64 * 1024 || !cookieValuePattern.test(value.value))
+  if (typeof value.value !== "string" || value.value.length > 64 * 1024 || !cookieValuePattern.test(value.value) && !quotedCookieValuePattern.test(value.value))
     return null;
   if (!hasSafeUnpartitionedProvenance(value))
     return null;
@@ -264,6 +265,11 @@ function parseBase64Json(input) {
   } catch {
     return null;
   }
+}
+function hasExplicitCookieScope(value) {
+  if (!isRecord(value))
+    return false;
+  return typeof value.domain === "string" && value.domain.trim() !== "" || typeof value.url === "string" && value.url.trim() !== "";
 }
 function parseNetscape(input) {
   const cookies = [];
@@ -381,8 +387,9 @@ function parseCookiePayload(input, target, nowSeconds = Math.floor(Date.now() / 
   }
   if (values === null)
     return { ok: false, reason: "invalid" };
+  const scopeProvenance = format === "netscape" || (format === "json" || format === "base64-json") && values.every(hasExplicitCookieScope) ? "explicit" : "target-inferred";
   const filtered = filterCookies(values, target, nowSeconds);
-  return filtered.cookies.length === 0 ? { ok: false, reason: "empty" } : { ok: true, format, ...filtered };
+  return filtered.cookies.length === 0 ? { ok: false, reason: "empty" } : { ok: true, format, scopeProvenance, ...filtered };
 }
 function readCookieFile(path, target, options = {}) {
   let descriptor;
@@ -399,6 +406,8 @@ function readCookieFile(path, target, options = {}) {
     const stats = fstatSync(descriptor);
     if (!stats.isFile())
       return { ok: false, reason: "unavailable" };
+    if (options.requirePrivate === true && ((stats.mode & 63) !== 0 || typeof process.getuid === "function" && stats.uid !== process.getuid()))
+      return { ok: false, reason: "unsafe-permissions" };
     if (stats.size > MAX_COOKIE_BYTES)
       return { ok: false, reason: "too-large" };
     const chunks = [];
@@ -1362,9 +1371,14 @@ function createCookieRecordReader(reader) {
       throw new Error("cookie capture requires --cookie-source or --cookies-file");
     }
     if (options.cookiesFile !== undefined) {
-      const parsed = readCookieFile(options.cookiesFile, url);
+      const parsed = readCookieFile(options.cookiesFile, url, {
+        requirePrivate: options.requireExplicitCookieScope === true
+      });
       if (!parsed.ok) {
         throw new Error("the explicitly selected cookie file contained no usable cookies for this request");
+      }
+      if (options.requireExplicitCookieScope === true && parsed.scopeProvenance !== "explicit") {
+        throw new Error("authenticated API cookie files require an explicit domain or URL on every cookie record");
       }
       const warnings2 = [];
       if (options.cookieSources.length > 0) {

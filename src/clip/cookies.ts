@@ -22,8 +22,13 @@ export type FilteredCookies = {
 };
 
 export type CookieFileResult =
-  | ({ readonly ok: true; readonly format: "json" | "base64-json" | "netscape" | "cookie-header" | "curl" } & FilteredCookies)
-  | { readonly ok: false; readonly reason: "unavailable" | "too-large" | "invalid" | "empty" };
+  | ({
+      readonly ok: true;
+      readonly format: "json" | "base64-json" | "netscape" | "cookie-header" | "curl";
+      /** Whether every accepted source record carried its own domain or URL scope. */
+      readonly scopeProvenance: "explicit" | "target-inferred";
+    } & FilteredCookies)
+  | { readonly ok: false; readonly reason: "unavailable" | "unsafe-permissions" | "too-large" | "invalid" | "empty" };
 
 export type CookieProviderResult = FilteredCookies & {
   readonly validShape: boolean;
@@ -34,6 +39,7 @@ type CandidateCookie = Readonly<Record<string, unknown>>;
 
 const cookieNamePattern = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 const cookieValuePattern = /^[\x21\x23-\x2B\x2D-\x3A\x3C-\x5B\x5D-\x7E]*$/;
+const quotedCookieValuePattern = /^"[\x21\x23-\x2B\x2D-\x3A\x3C-\x5B\x5D-\x7E]*"$/;
 const cookieDomainPattern = /^[a-z0-9.-]+$/i;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -178,7 +184,7 @@ function validatedCookie(
   if (
     typeof value.value !== "string"
     || value.value.length > 64 * 1024
-    || !cookieValuePattern.test(value.value)
+    || (!cookieValuePattern.test(value.value) && !quotedCookieValuePattern.test(value.value))
   ) return null;
   if (!hasSafeUnpartitionedProvenance(value)) return null;
   const domain = candidateDomain(value, target);
@@ -269,6 +275,12 @@ function parseBase64Json(input: string): readonly unknown[] | null {
   } catch {
     return null;
   }
+}
+
+function hasExplicitCookieScope(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return (typeof value.domain === "string" && value.domain.trim() !== "")
+    || (typeof value.url === "string" && value.url.trim() !== "");
 }
 
 function parseNetscape(input: string): readonly unknown[] | null {
@@ -395,10 +407,14 @@ export function parseCookiePayload(
     }
   }
   if (values === null) return { ok: false, reason: "invalid" };
+  const scopeProvenance = format === "netscape"
+    || ((format === "json" || format === "base64-json") && values.every(hasExplicitCookieScope))
+    ? "explicit"
+    : "target-inferred";
   const filtered = filterCookies(values, target, nowSeconds);
   return filtered.cookies.length === 0
     ? { ok: false, reason: "empty" }
-    : { ok: true, format, ...filtered };
+    : { ok: true, format, scopeProvenance, ...filtered };
 }
 
 /** Read only one explicit bounded regular file. It never falls back to browser providers. */
@@ -408,6 +424,8 @@ export function readCookieFile(
   options: {
     /** Test seam. Production callers must leave this unset. */
     readonly afterOpen?: () => void;
+    /** Authenticated API callers require a current-user-owned mode-0600-style file. */
+    readonly requirePrivate?: boolean;
   } = {},
 ): CookieFileResult {
   let descriptor: number;
@@ -423,6 +441,11 @@ export function readCookieFile(
     options.afterOpen?.();
     const stats = fstatSync(descriptor);
     if (!stats.isFile()) return { ok: false, reason: "unavailable" };
+    if (
+      options.requirePrivate === true
+      && ((stats.mode & 0o077) !== 0
+        || (typeof process.getuid === "function" && stats.uid !== process.getuid()))
+    ) return { ok: false, reason: "unsafe-permissions" };
     if (stats.size > MAX_COOKIE_BYTES) return { ok: false, reason: "too-large" };
     const chunks: Buffer[] = [];
     const buffer = Buffer.allocUnsafe(64 * 1024);

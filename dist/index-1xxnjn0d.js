@@ -5,6 +5,8 @@ var BELL = 7;
 var STRING_TERMINATOR = 156;
 var MAX_PENDING_LENGTH = 64 * 1024;
 var MAX_PENDING_SEGMENTS = 4096;
+var CONTEXT_FREE_TERMINAL_CONTROLS = new RegExp(String.raw`[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]`, "g");
+var CONTEXT_SENSITIVE_TERMINAL_CONTROLS = new RegExp(String.raw`[\u0009\u000d\u001b\u0090\u0098\u009b\u009d-\u009f\u2028\u2029]`);
 function chunkBuilder() {
   const chunks = [];
   let pending = [];
@@ -96,6 +98,9 @@ function hasUnsafeTerminalCharacters(value) {
   return false;
 }
 function sanitizeTerminalText(value) {
+  if (!CONTEXT_SENSITIVE_TERMINAL_CONTROLS.test(value)) {
+    return value.replace(CONTEXT_FREE_TERMINAL_CONTROLS, "");
+  }
   let builder = null;
   let unchangedStart = 0;
   const replace = (start, end, replacement = "") => {

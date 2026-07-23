@@ -17,6 +17,7 @@ import {
   browserProxyArguments,
   seedOwnedBrowserCookies,
   createCookieHeaderReader,
+  createCookieRecordReader,
   isolatedAgentBrowserEnvironment,
   mergeRenderedTextSnapshots,
   readBrowserExpansionTelemetry,
@@ -626,6 +627,45 @@ test("persistent profile and output confinement canonicalize missing paths below
 });
 
 describe("explicit cookie-file isolation", () => {
+  test("authenticated API selection rejects target-inferred cookie files", () => {
+    const directory = mkdtempSync(join(tmpdir(), "clip-cookie-scope-"));
+    temporaryDirectories.push(directory);
+    const file = join(directory, "cookies.txt");
+    writeFileSync(file, "Cookie: session=private", { mode: 0o600 });
+    const read = createCookieRecordReader(() => Promise.reject(new Error("must not probe a browser")));
+
+    expect(read({
+      cookieSources: [],
+      cookiesFile: file,
+      cookieProfile: undefined,
+      timeoutMs: 1_000,
+      requireExplicitCookieScope: true,
+    }, new URL("https://example.com/account"))).rejects.toThrow("explicit domain or URL");
+  });
+
+  test("authenticated API selection rejects group/world-readable cookie files", () => {
+    const directory = mkdtempSync(join(tmpdir(), "clip-cookie-mode-"));
+    temporaryDirectories.push(directory);
+    const file = join(directory, "cookies.json");
+    writeFileSync(file, JSON.stringify([{
+      name: "session",
+      value: "private",
+      domain: "example.com",
+      hostOnly: true,
+      path: "/",
+      secure: true,
+    }]), { mode: 0o644 });
+    const read = createCookieRecordReader(() => Promise.reject(new Error("must not probe a browser")));
+
+    expect(read({
+      cookieSources: [],
+      cookiesFile: file,
+      cookieProfile: undefined,
+      timeoutMs: 1_000,
+      requireExplicitCookieScope: true,
+    }, new URL("https://example.com/account"))).rejects.toThrow("no usable cookies");
+  });
+
   test("an invalid file fails closed without probing any browser provider", async () => {
     const directory = mkdtempSync(join(tmpdir(), "clip-cookie-acquire-"));
     temporaryDirectories.push(directory);

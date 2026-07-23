@@ -6,7 +6,7 @@ import {
   resolveRemote,
   rewriteContentWithStatus,
   scanImageSources
-} from "./index-k5h9erpt.js";
+} from "./index-hgve9rh2.js";
 import {
   FetchFailure,
   safeFetch

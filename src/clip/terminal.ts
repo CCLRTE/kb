@@ -9,6 +9,13 @@ const BELL = 0x07;
 const STRING_TERMINATOR = 0x9c;
 const MAX_PENDING_LENGTH = 64 * 1024;
 const MAX_PENDING_SEGMENTS = 4_096;
+const CONTEXT_FREE_TERMINAL_CONTROLS = new RegExp(
+  String.raw`[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]`,
+  "g",
+);
+const CONTEXT_SENSITIVE_TERMINAL_CONTROLS = new RegExp(
+  String.raw`[\u0009\u000d\u001b\u0090\u0098\u009b\u009d-\u009f\u2028\u2029]`,
+);
 
 type ChunkBuilder = {
   readonly append: (value: string) => void;
@@ -115,6 +122,13 @@ export function hasUnsafeTerminalCharacters(value: string): boolean {
 
 /** Strip ANSI/OSC payloads, C0/C1 controls, DEL, and bidi formatting controls. */
 export function sanitizeTerminalText(value: string): string {
+  // Let the string engine remove context-free controls in one bounded pass.
+  // Escape strings, CSI, normalized whitespace, and line separators still use
+  // the state machine below because their replacement depends on neighbors.
+  if (!CONTEXT_SENSITIVE_TERMINAL_CONTROLS.test(value)) {
+    return value.replace(CONTEXT_FREE_TERMINAL_CONTROLS, "");
+  }
+
   let builder: ChunkBuilder | null = null;
   let unchangedStart = 0;
   const replace = (start: number, end: number, replacement = ""): void => {

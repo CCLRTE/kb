@@ -72,6 +72,29 @@ function collectVideoPosters(html: string): readonly string[] {
   return posters;
 }
 
+// Defuddle's X extractor currently reads DOM position constants from the
+// browser-global `Node` constructor even when its Node entrypoint has created a
+// LinkeDOM document. Bun workers do not expose that constructor globally.
+const domGlobal = globalThis as unknown as {
+  Node?: Readonly<Record<
+    | "DOCUMENT_POSITION_DISCONNECTED"
+    | "DOCUMENT_POSITION_PRECEDING"
+    | "DOCUMENT_POSITION_FOLLOWING"
+    | "DOCUMENT_POSITION_CONTAINS"
+    | "DOCUMENT_POSITION_CONTAINED_BY"
+    | "DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC",
+    number
+  >>;
+};
+domGlobal.Node ??= Object.freeze({
+  DOCUMENT_POSITION_DISCONNECTED: 1,
+  DOCUMENT_POSITION_PRECEDING: 2,
+  DOCUMENT_POSITION_FOLLOWING: 4,
+  DOCUMENT_POSITION_CONTAINS: 8,
+  DOCUMENT_POSITION_CONTAINED_BY: 16,
+  DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC: 32,
+});
+
 workerGlobal.onmessage = async (event: MessageEvent<unknown>): Promise<void> => {
   const request = event.data;
   if (

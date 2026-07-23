@@ -1146,7 +1146,10 @@ export type CookieStoreReader = (options: GetCookiesOptions) => Promise<unknown>
 export type CookieSelection = Pick<
   CaptureArguments,
   "cookieSources" | "cookiesFile" | "cookieProfile" | "timeoutMs"
->;
+> & {
+  /** Authenticated API callers must not infer a cookie's host from their request target. */
+  readonly requireExplicitCookieScope?: boolean;
+};
 export type CookieHeaderReader = (
   options: CookieSelection,
   url: URL,
@@ -1163,9 +1166,14 @@ export function createCookieRecordReader(reader: CookieStoreReader): CookieRecor
       throw new Error("cookie capture requires --cookie-source or --cookies-file");
     }
     if (options.cookiesFile !== undefined) {
-      const parsed = readCookieFile(options.cookiesFile, url);
+      const parsed = readCookieFile(options.cookiesFile, url, {
+        requirePrivate: options.requireExplicitCookieScope === true,
+      });
       if (!parsed.ok) {
         throw new Error("the explicitly selected cookie file contained no usable cookies for this request");
+      }
+      if (options.requireExplicitCookieScope === true && parsed.scopeProvenance !== "explicit") {
+        throw new Error("authenticated API cookie files require an explicit domain or URL on every cookie record");
       }
       const warnings: string[] = [];
       if (options.cookieSources.length > 0) {

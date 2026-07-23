@@ -3,7 +3,7 @@ import {
   hasUnsafeTerminalCharacters,
   sanitizeTerminalLine,
   sanitizeTerminalText
-} from "../index-q32a8bfd.js";
+} from "../index-1xxnjn0d.js";
 export {
   sanitizeTerminalText,
   sanitizeTerminalLine,

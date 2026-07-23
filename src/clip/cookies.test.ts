@@ -154,6 +154,7 @@ describe("strict browser-like cookie filtering", () => {
     const result = filterCookieProviderResult({
       cookies: [
         { name: "parent", value: "ok", domain: "example.com", hostOnly: false, path: "/account", secure: true, httpOnly: true, sameSite: "Strict", expires: future },
+        { name: "JSESSIONID", value: '"ajax:123456"', domain: "example.com", hostOnly: false, path: "/account", secure: true, httpOnly: false, sameSite: "Lax", expires: future },
         { name: "provider-parent", value: "ok", domain: "example.com", path: "/account", sameSite: "Lax" },
         { name: "session", value: "ok", domain: "example.com", hostOnly: true, path: "/account" },
         { name: "host-only", value: "no", domain: "example.com", hostOnly: true, path: "/account" },
@@ -168,8 +169,8 @@ describe("strict browser-like cookie filtering", () => {
     expect(result.validShape).toBeTrue();
     expect(result.rejected).toBe(7);
     expect(result.providerWarningCount).toBe(1);
-    expect(renderCookieHeader(result.cookies)).toBe("parent=ok");
-    expect(result.cookies[0]).toMatchObject({
+    expect(renderCookieHeader(result.cookies)).toBe('JSESSIONID="ajax:123456"; parent=ok');
+    expect(result.cookies.find((cookie) => cookie.name === "parent")).toMatchObject({
       name: "parent",
       path: "/account",
       secure: true,
@@ -243,6 +244,21 @@ describe("explicit cookie payload formats", () => {
         sameSite: "Strict",
       });
     }
+  });
+
+  test("distinguishes explicit scope from target-inferred cookie payloads", () => {
+    const explicit = parseCookiePayload(JSON.stringify([cookie]), target, 1_700_000_000);
+    const domainless = parseCookiePayload(JSON.stringify([{
+      name: "session",
+      value: "value",
+      path: "/",
+      secure: true,
+    }]), target, 1_700_000_000);
+    const header = parseCookiePayload("Cookie: session=value", target, 1_700_000_000);
+
+    expect(explicit.ok && explicit.scopeProvenance).toBe("explicit");
+    expect(domainless.ok && domainless.scopeProvenance).toBe("target-inferred");
+    expect(header.ok && header.scopeProvenance).toBe("target-inferred");
   });
 
   test("rejects empty, malformed, and entirely out-of-scope input", () => {
