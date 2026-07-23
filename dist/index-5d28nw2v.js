@@ -2,7 +2,7 @@
 import {
   findKbPackageRoot,
   isolatedAgentBrowserEnvironment
-} from "./index-n7dy660d.js";
+} from "./index-t0860ffg.js";
 import {
   BoundedByteBuffer
 } from "./index-efcktfvv.js";

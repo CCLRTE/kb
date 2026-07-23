@@ -31,12 +31,9 @@ import { sanitizeArtifactUrl } from "./persist.js";
 const agentBrowserBinDirectory = join(resolvePackageDirectory("agent-browser"), "bin");
 
 export function agentBrowserCommand(): readonly string[] {
-  const platform = process.platform === "win32" ? "win32" : process.platform;
-  const extension = process.platform === "win32" ? ".exe" : "";
-  const native = join(agentBrowserBinDirectory, `agent-browser-${platform}-${process.arch}${extension}`);
-  return existsSync(native)
-    ? [native]
-    : [process.execPath, join(agentBrowserBinDirectory, "agent-browser.js")];
+  // The upstream wrapper selects glibc versus musl and restores the executable
+  // bit when package lifecycle scripts were intentionally skipped.
+  return [process.execPath, join(agentBrowserBinDirectory, "agent-browser.js")];
 }
 
 export type AcquisitionMethod =

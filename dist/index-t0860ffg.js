@@ -501,10 +501,7 @@ function resolvePackageDirectory(packageName, parentUrl = import.meta.url) {
 // src/clip/acquire.ts
 var agentBrowserBinDirectory = join2(resolvePackageDirectory("agent-browser"), "bin");
 function agentBrowserCommand() {
-  const platform = process.platform === "win32" ? "win32" : process.platform;
-  const extension = process.platform === "win32" ? ".exe" : "";
-  const native = join2(agentBrowserBinDirectory, `agent-browser-${platform}-${process.arch}${extension}`);
-  return existsSync2(native) ? [native] : [process.execPath, join2(agentBrowserBinDirectory, "agent-browser.js")];
+  return [process.execPath, join2(agentBrowserBinDirectory, "agent-browser.js")];
 }
 var inheritedProxyKeys = new Set([
   "ALL_PROXY",

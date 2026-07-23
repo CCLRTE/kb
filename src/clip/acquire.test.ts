@@ -7,6 +7,7 @@ import { runInNewContext } from "node:vm";
 
 import {
   acquireBrowser,
+  agentBrowserCommand,
   assertSafePersistentProfile,
   browserExpansionLimits,
   browserExpansionScript,
@@ -78,6 +79,13 @@ function cookieOptions(cookieFile: string): CaptureArguments {
     userAgent: "test",
   };
 }
+
+test("uses the cross-platform agent-browser wrapper when lifecycle scripts are skipped", () => {
+  expect(agentBrowserCommand()).toEqual([
+    process.execPath,
+    expect.stringMatching(/[/\\]agent-browser[/\\]bin[/\\]agent-browser\.js$/u),
+  ]);
+});
 
 test("fresh-browser cookie commands preserve host, path, Secure, HttpOnly, SameSite, and expiry", () => {
   expect(browserCookieCommands([{
