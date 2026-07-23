@@ -448,12 +448,14 @@ describe("bounded requests", () => {
         getLocalNetworkAddresses: () => [],
         resolveHostname: () => Promise.resolve([{ address: "127.0.0.1", family: 4 }]),
       });
-      const request = fetch(
-        new URL(`http://deadline.invalid:${address.port}/`),
-        fetchOptions({ allowPrivateNetwork: true, timeoutMs: 100 }),
+      const requestFailure = rejectedFetch(
+        fetch(
+          new URL(`http://deadline.invalid:${address.port}/`),
+          fetchOptions({ allowPrivateNetwork: true, timeoutMs: 100 }),
+        ),
       );
       await within(acceptedPromise, "the production transport fixture to accept a request");
-      const failure = await rejectedFetch(request);
+      const failure = await requestFailure;
       expect(failure.code).toBe("timeout");
       await within(upstreamClosedPromise, "the aborted transport socket to close");
     } finally {
