@@ -2,7 +2,7 @@
 import {
   findKbPackageRoot,
   isolatedAgentBrowserEnvironment
-} from "./index-yn2qjcxe.js";
+} from "./index-c1dx8x7c.js";
 import {
   BoundedByteBuffer
 } from "./index-efcktfvv.js";
@@ -213,7 +213,7 @@ async function commandVersion(path, arguments_, run) {
     const result = await run({ command: [path, ...arguments_], timeoutMs: 30000, maxOutputBytes: 128 * 1024 });
     if (result.exitCode !== 0)
       return null;
-    const firstLine = result.stdout.trim().split(/\r?\n/, 1)[0] ?? "";
+    const firstLine = (result.stdout.trim() || result.stderr.trim()).split(/\r?\n/, 1)[0] ?? "";
     return firstLine === "" ? null : firstLine;
   } catch {
     return null;
@@ -298,10 +298,36 @@ async function inspectClipEnvironment(options = {}) {
     "/opt/homebrew/bin/ffmpeg",
     "/usr/local/bin/ffmpeg"
   ], which, exists);
-  const [agentBrowser, ytDlpVersion, ffmpegVersion] = await Promise.all([
+  const pdfinfoPath = findExecutable("pdfinfo", [
+    "/opt/homebrew/bin/pdfinfo",
+    "/usr/local/bin/pdfinfo",
+    "/usr/bin/pdfinfo"
+  ], which, exists);
+  const pdftohtmlPath = findExecutable("pdftohtml", [
+    "/opt/homebrew/bin/pdftohtml",
+    "/usr/local/bin/pdftohtml",
+    "/usr/bin/pdftohtml"
+  ], which, exists);
+  const tesseractPath = findExecutable("tesseract", [
+    join(homeDirectory, ".local", "bin", "tesseract"),
+    "/opt/homebrew/bin/tesseract",
+    "/usr/local/bin/tesseract",
+    "/usr/bin/tesseract"
+  ], which, exists);
+  const [
+    agentBrowser,
+    ytDlpVersion,
+    ffmpegVersion,
+    pdfinfoVersion,
+    pdftohtmlVersion,
+    tesseractVersion
+  ] = await Promise.all([
     inspectAgentBrowser(agentBrowserDirectory, exists, run),
     commandVersion(ytDlpPath, ["--version"], run),
-    commandVersion(ffmpegPath, ["-version"], run)
+    commandVersion(ffmpegPath, ["-version"], run),
+    commandVersion(pdfinfoPath, ["-v"], run),
+    commandVersion(pdftohtmlPath, ["-v"], run),
+    commandVersion(tesseractPath, ["--version"], run)
   ]);
   const tools = [
     {
@@ -315,6 +341,24 @@ async function inspectClipEnvironment(options = {}) {
       path: ffmpegPath,
       version: ffmpegVersion,
       status: ffmpegPath === null ? "unavailable" : ffmpegVersion === null ? "partial" : "ready"
+    },
+    {
+      name: "pdfinfo",
+      path: pdfinfoPath,
+      version: pdfinfoVersion,
+      status: pdfinfoPath === null ? "unavailable" : pdfinfoVersion === null ? "partial" : "ready"
+    },
+    {
+      name: "pdftohtml",
+      path: pdftohtmlPath,
+      version: pdftohtmlVersion,
+      status: pdftohtmlPath === null ? "unavailable" : pdftohtmlVersion === null ? "partial" : "ready"
+    },
+    {
+      name: "tesseract",
+      path: tesseractPath,
+      version: tesseractVersion,
+      status: tesseractPath === null ? "unavailable" : tesseractVersion === null ? "partial" : "ready"
     }
   ];
   const warnings = [];
@@ -339,10 +383,25 @@ async function inspectClipEnvironment(options = {}) {
   if (agentBrowser.profiles.length === 0) {
     warnings.push("No discoverable Chrome profile names were reported; use --browser-live, --cdp, or an explicit profile path when needed.");
   }
-  if (ytDlpPath === null)
-    warnings.push("Install yt-dlp to enable --media all for supported public or authorized pages.");
+  if (ytDlpPath === null) {
+    warnings.push("Install yt-dlp to capture default YouTube metadata, thumbnails, and transcripts, and to enable optional --media all downloads.");
+  }
   if (ffmpegPath === null)
     warnings.push("Install ffmpeg for yt-dlp formats that require audio/video merging or remuxing.");
+  if (pdfinfoPath === null || pdftohtmlPath === null) {
+    const missing = [
+      ...pdfinfoPath === null ? ["pdfinfo"] : [],
+      ...pdftohtmlPath === null ? ["pdftohtml"] : []
+    ];
+    warnings.push(`Install Poppler's ${missing.join(" and ")} command${missing.length === 1 ? "" : "s"}; kb pdf requires both pdfinfo and pdftohtml.`);
+  } else if (pdfinfoVersion === null || pdftohtmlVersion === null) {
+    warnings.push("Poppler was found, but a PDF tool version could not be verified; kb pdf can attempt ingestion with a degraded tool report.");
+  }
+  if (tesseractPath === null) {
+    warnings.push("Install Tesseract to transcribe text in scans and screenshots; kb pdf still preserves native text and images without OCR.");
+  } else if (tesseractVersion === null) {
+    warnings.push("Tesseract was found, but its version could not be verified; kb pdf can attempt OCR with a degraded tool report.");
+  }
   return {
     schemaVersion: 1,
     generatedAt: (options.now ?? (() => new Date))().toISOString(),
@@ -368,7 +427,7 @@ function versionSummary(report) {
 }
 function renderDoctorReport(report) {
   const lines = [
-    "Clip environment",
+    "KB ingestion environment",
     `Bun: ${report.bun.status} (${report.bun.currentVersion}; expected ${report.bun.expectedVersion})`,
     ...report.dependencies.map(versionSummary),
     `agent-browser derive-client: ${report.deriveClient.status}`,
@@ -508,11 +567,15 @@ var adapterCapabilities = [
   {
     id: "youtube",
     platform: "YouTube",
-    preferredModes: ["HTTP + Defuddle", "rendered browser", "yt-dlp for accessible media"],
+    preferredModes: ["yt-dlp metadata + thumbnail + transcript", "HTTP + Defuddle", "rendered browser"],
     page: "best-effort",
     conversations: "best-effort",
     media: "best-effort",
-    limitations: ["Only loaded comments are retained", "transcripts and member-only regions depend on what the selected session renders"]
+    limitations: [
+      "Transcript capture depends on an available exact-language caption track",
+      "Only loaded comments are retained",
+      "Full audio/video download remains opt-in with --media all"
+    ]
   },
   {
     id: "github",

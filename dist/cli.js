@@ -1,14 +1,11 @@
 #!/usr/bin/env bun
 // @bun
 import {
+  main as main2
+} from "./index-bd4r3s87.js";
+import {
   initVault
 } from "./index-455fqvmn.js";
-import {
-  navigateLinks
-} from "./index-9w6m3y9a.js";
-import {
-  queryVault
-} from "./index-m4bexhht.js";
 import {
   indexSemanticVault,
   refreshVault,
@@ -19,16 +16,24 @@ import {
   lookupNote
 } from "./index-p9485vbq.js";
 import {
+  navigateLinks
+} from "./index-9w6m3y9a.js";
+import {
+  queryVault
+} from "./index-m4bexhht.js";
+import {
   main
-} from "./index-73z3cn3d.js";
+} from "./index-ktbkx0qm.js";
+import"./index-tcnqv6w8.js";
 import"./index-k3pqw1a7.js";
-import"./index-5vt7gy7e.js";
-import"./index-yn2qjcxe.js";
+import"./index-mz08nz1e.js";
+import"./index-c1dx8x7c.js";
 import"./index-k4cczfgz.js";
+import"./index-k5h9erpt.js";
 import"./index-kvxzb85x.js";
 import {
   redactSensitiveText
-} from "./index-7x30yhyy.js";
+} from "./index-f49xpe9k.js";
 import {
   sanitizeTerminalLine,
   sanitizeTerminalText
@@ -48,6 +53,7 @@ Usage:
   kb init [directory] [--json]
   kb clip <url|current> [capture options]
   kb inspect <url> [capture options]
+  kb pdf <file> [PDF options]
   kb refresh [--root <directory>] [--index <path>] [--json]
   kb check [--root <directory>] [--index <path>] [--json]
   kb graph [--root <directory>] [--index <path>] [--json]
@@ -59,7 +65,7 @@ Usage:
   kb doctor [--json]
   kb adapters [--json]
 
-Run \`kb clip --help\` for capture, authentication, evidence, and resource-bound options.
+Run \`kb clip --help\` for web capture options or \`kb pdf --help\` for PDF conversion options.
 `;
 function safe(value) {
   return sanitizeTerminalLine(redactSensitiveText(value));
@@ -376,6 +382,9 @@ function parseArguments(arguments_) {
     const delegated = command === "inspect" ? "inspect" : "capture";
     return { ok: true, value: { kind: "clip", arguments: [delegated, ...arguments_.slice(1)] } };
   }
+  if (command === "pdf") {
+    return { ok: true, value: { kind: "pdf", arguments: arguments_.slice(1) } };
+  }
   if (command === "doctor" || command === "adapters") {
     return { ok: true, value: { kind: "clip", arguments: arguments_ } };
   }
@@ -648,7 +657,7 @@ async function runVault(command, output, dependencies) {
   output.stdout(command.json ? terminalSafeJson(backlinkPayload(lookup.note.path, backlinks)) : sanitizeTerminalText(renderBacklinks(lookup.note.path, backlinks)));
   return 0;
 }
-async function main2(rawArguments = process.argv.slice(2), output = defaultOutput, dependencies = {}) {
+async function main3(rawArguments = process.argv.slice(2), output = defaultOutput, dependencies = {}) {
   const parsed = parseArguments(rawArguments);
   if (!parsed.ok) {
     output.stderr(`error: ${safe(parsed.message)}
@@ -664,6 +673,9 @@ ${sanitizeTerminalText(usage)}`);
   try {
     if (command.kind === "clip") {
       return await (dependencies.runClipCommand ?? main)(command.arguments, process.env, output);
+    }
+    if (command.kind === "pdf") {
+      return await (dependencies.runPdfCommand ?? main2)(command.arguments, process.env, output);
     }
     if (command.kind === "init") {
       return await runInit(command, output, dependencies.initVault ?? initVault);
@@ -681,9 +693,9 @@ ${sanitizeTerminalText(usage)}`);
   }
 }
 if (import.meta.main)
-  process.exitCode = await main2();
+  process.exitCode = await main3();
 export {
   usage,
   parseArguments,
-  main2 as main
+  main3 as main
 };

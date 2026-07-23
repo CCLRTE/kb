@@ -99,6 +99,18 @@ Review the Markdown and `capture.json` together. Preserve the recorded status, w
 
 The capture command reads content and writes a local bundle. It does not post, like, follow, send, delete, or submit on the source service.
 
+Capture a local PDF through its separate file-ingestion path:
+
+```sh
+kb pdf "/absolute/path/to/document.pdf" --output articles
+```
+
+Review native headings, OCR-derived text, and retained source images together.
+The bundle keeps `source.pdf` byte-for-byte and never records its original
+absolute path. A text-bearing screenshot still needs its source-image
+reference; a useful native-text result does not hide an unprocessed image or
+page.
+
 ## Finish every change
 
 After adding, renaming, moving, or materially revising notes:

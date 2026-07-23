@@ -51,6 +51,9 @@
       "@cclrte/kb/navigation": [
         "./src/navigation.ts"
       ],
+      "@cclrte/kb/pdf": [
+        "./src/pdf.ts"
+      ],
       "@cclrte/kb/query": [
         "./src/query.ts"
       ],

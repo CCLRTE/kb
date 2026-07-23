@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import type { AcquiredPage } from "./acquire.js";
 import type { CaptureArguments } from "./args.js";
-import { appendCapturedMedia, captureSlug, effectiveScope, runCapture } from "./capture.js";
+import { appendCapturedMedia, appendVideoContext, captureSlug, effectiveScope, runCapture } from "./capture.js";
 import { countWords, type ExtractedPage } from "./extract.js";
 import { CONTENT_REWRITE_TRUNCATION_WARNING } from "./lib.js";
 
@@ -53,6 +53,38 @@ test("appends playable local video and audio while rejecting unsafe media paths"
   expect(markdown).not.toContain("outside.mp4");
 });
 
+test("renders video metadata, a local thumbnail, and transcript context", () => {
+  const markdown = appendVideoContext("Article body", {
+    status: "captured",
+    thumbnail: {
+      path: "assets/video/thumb image.webp",
+      mimeType: "image/webp",
+      bytes: 10,
+      sha256: "d".repeat(64),
+    },
+    transcript: {
+      language: "en",
+      markdown: "- [00:01] Hello from the transcript.\n",
+      cueCount: 1,
+      truncated: false,
+    },
+    metadata: {
+      id: "video-1",
+      title: "A *useful* video",
+      description: "First line.\nSecond line.",
+      channel: "Example Channel",
+      durationSeconds: 3_661,
+    },
+    warnings: [],
+  });
+  expect(markdown).toContain("## Video");
+  expect(markdown).toContain("A \\*useful\\* video");
+  expect(markdown).toContain("**Duration:** 01:01:01");
+  expect(markdown).toContain("![Video thumbnail](assets/video/thumb%20image.webp)");
+  expect(markdown).toContain("## Transcript");
+  expect(markdown).toContain("[00:01] Hello from the transcript.");
+});
+
 const acquisition = (url: string): AcquiredPage => ({
   body: "<main><h1>Fixture</h1><p>Enough useful fixture prose for extraction.</p></main>",
   contentType: "text/html",
@@ -81,6 +113,81 @@ describe("capture orchestration", () => {
     expect(effectiveScope("x", "auto")).toBe("thread");
     expect(effectiveScope("generic", "auto")).toBe("page");
     expect(effectiveScope("x", "page")).toBe("page");
+  });
+
+  test("captures YouTube context by default without downloading the video payload", async () => {
+    const root = mkdtempSync(join(tmpdir(), "clip-capture-youtube-context-"));
+    const url = "https://www.youtube.com/watch?v=video-1";
+    let fullMediaCalls = 0;
+    try {
+      const result = await runCapture(baseOptions(url, {
+        command: "capture",
+        stdout: false,
+        outputBase: root,
+        media: "images",
+      }), {
+        acquirePublicStructured: () => Promise.resolve(null),
+        acquireHttp: () => Promise.resolve(acquisition(url)),
+        extractPage: () => Promise.resolve({
+          ...extraction(url),
+          platform: "youtube",
+        }),
+        captureVideoContext: (options) => {
+          const thumbnail = Buffer.from("89504e470d0a1a0a", "hex");
+          mkdirSync(options.outputDirectory, { recursive: true });
+          writeFileSync(join(options.outputDirectory, "thumb.png"), thumbnail);
+          return Promise.resolve({
+            status: "captured",
+            thumbnail: {
+              path: "assets/video/thumb.png",
+              mimeType: "image/png",
+              bytes: thumbnail.byteLength,
+              sha256: "a".repeat(64),
+            },
+            transcript: {
+              language: "en",
+              markdown: "- [00:02] Durable transcript text.\n",
+              cueCount: 1,
+              truncated: false,
+            },
+            metadata: {
+              id: "video-1",
+              title: "Canonical video title",
+              description: "Canonical video description.",
+              channel: "Canonical Channel",
+              channelId: "channel-1",
+              durationSeconds: 92,
+            },
+            warnings: [],
+          });
+        },
+        captureMedia: () => {
+          fullMediaCalls += 1;
+          return Promise.resolve({ status: "captured", records: [], metadata: null, warnings: [] });
+        },
+        now: () => new Date("2026-07-23T12:00:00Z"),
+      });
+      expect(fullMediaCalls).toBe(0);
+      expect(result.markdown).toContain("title: \"Canonical video title\"");
+      expect(result.markdown).toContain("author: \"Canonical Channel\"");
+      expect(result.markdown).toContain("description: \"Canonical video description.\"");
+      expect(result.markdown).toContain("![Video thumbnail](assets/video/thumb.png)");
+      expect(result.markdown).toContain("## Transcript");
+      expect(result.manifest?.artifacts.videoContext).toMatchObject({
+        requested: true,
+        status: "captured",
+        thumbnailPath: "assets/video/thumb.png",
+        transcriptLanguage: "en",
+        transcriptCueCount: 1,
+        metadata: {
+          channel: "Canonical Channel",
+          durationSeconds: 92,
+        },
+      });
+      expect(existsSync(join(result.outputDirectory ?? "", "assets", "video", "thumb.png"))).toBeTrue();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test("captures from a disposable copy of a path-backed signed-in profile", async () => {
@@ -511,7 +618,7 @@ describe("capture orchestration", () => {
       });
       expect(result.markdownPath).toBe(join(realpathSync(root), "fixture", "fixture.md"));
       expect(existsSync(result.markdownPath ?? "")).toBe(true);
-      expect(readFileSync(join(root, "fixture", "capture.json"), "utf8")).toContain('"schemaVersion": 2');
+      expect(readFileSync(join(root, "fixture", "capture.json"), "utf8")).toContain('"schemaVersion": 3');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

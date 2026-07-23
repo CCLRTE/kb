@@ -1,6 +1,6 @@
 # CCLRTE/kb
 
-CCLRTE/kb is a simple, local-first command-line tool for an Obsidian-compatible Markdown knowledge base for coding agents. It keeps notes readable without the tool, queries typed frontmatter, derives a deterministic link graph from explicit wikilinks, offers optional local semantic recall, and captures web sources as auditable bundles instead of opaque blobs.
+CCLRTE/kb is a simple, local-first command-line tool for an Obsidian-compatible Markdown knowledge base for coding agents. It keeps notes readable without the tool, queries typed frontmatter, derives a deterministic link graph from explicit wikilinks, offers optional local semantic recall, and captures web and PDF sources as auditable bundles instead of opaque blobs.
 
 The CLI is Bun-first. Refresh, graph navigation, exact metadata queries, and capture do not require a model, an API key, a database, or a hosted service. Semantic search uses a replaceable local QMD index; Markdown remains the source of truth.
 
@@ -55,6 +55,10 @@ When the useful page is already visible, `kb clip current --browser-live` reads 
 
 A capture produces readable Markdown beside `capture.json` and any localized assets. The manifest records the source URL, attempted routes, chosen extractor, completeness state, counts, warnings, and artifact hashes. “Complete” refers to the selected bounded representation, not every hidden branch of a service or a future version of the page. Bundle installation is atomic, so an interrupted write does not leave a source record that only looks finished.
 
+Media follows the same evidence rule. Images from ordinary pages, X, LinkedIn, and other rendered surfaces are localized into the bundle, while exposed video posters remain inspectable without downloading the full video. A normal YouTube capture adds available title, description, duration, channel, thumbnail, and transcript context; full audio or video remains an explicit opt-in.
+
+Local PDFs use the same durable bundle idea without pretending a file is a URL. `kb pdf` keeps the original PDF byte-for-byte, infers headings from native layout, extracts every embedded image, and uses local OCR for scans and screenshots. Text-bearing images become inspectable Markdown with page and geometry metadata while the source image remains available; primarily visual images stay embedded. This matters for hybrid documents such as exported reports whose later pages are really Slack messages, diagrams, or photographs.
+
 The bundle is evidence, not the final interpretation. A maintained note can cite several captures, record disagreement, and change when later evidence warrants it. The captures stay available for audit. This source-versus-synthesis boundary prevents an agent from silently replacing what a page said with what the agent now believes it meant.
 
 ### Use structure before semantic guesswork
@@ -91,11 +95,11 @@ A vector score means that two passages occupy a nearby region in an embedding mo
 
 A plan shown only in chat has the same session boundary as the reasoning that produced it. The package's `plan-kb` skill writes the plan as a normal file with an outcome, status, area, assumptions, dependencies, decisions, and a verification method. During execution, the same file accumulates deviations, review findings, command evidence, and the final result. Completed plans remain as history; current operating truth moves into code, documentation, or maintained notes.
 
-CCLRTE/kb ships four Agent Skills with the installed package. `save-url-kb` selects an acquisition route and records completeness. `query-kb` chooses among exact metadata, graph traversal, and semantic search. `refresh-kb` regenerates the catalog and reviews link diagnostics without manufacturing edges. `plan-kb` keeps execution knowledge durable. Their shared `-kb` suffix makes the skill family easy to scan and invoke consistently. The [agent workflow documentation](<https://github.com/CCLRTE/kb/blob/main/docs/agent-workflow.md>) defines how those skills meet the same CLI contracts across agent runners.
+CCLRTE/kb ships five Agent Skills with the installed package. `save-url-kb` selects an acquisition route and records completeness. `save-pdf-kb` turns local PDFs into Markdown while preserving native text, image text, visual assets, and file provenance. `query-kb` chooses among exact metadata, graph traversal, and semantic search. `refresh-kb` regenerates the catalog and reviews link diagnostics without manufacturing edges. `plan-kb` keeps execution knowledge durable. Their shared `-kb` suffix makes the skill family easy to scan and invoke consistently. The [agent workflow documentation](<https://github.com/CCLRTE/kb/blob/main/docs/agent-workflow.md>) defines how those skills meet the same CLI contracts across agent runners.
 
 ### Adopt the parts that prevent repeated rediscovery
 
-A small vault may need only Markdown, Git, an index, and ordinary file search. Add deterministic metadata queries when filenames stop answering exact questions. Add link traversal when relationships matter. Add QMD when vocabulary drift makes exact search miss useful notes. Add browser clipping when important evidence lives on signed-in or rendered surfaces. Each layer is optional because the lower layer remains readable on its own.
+A small vault may need only Markdown, Git, an index, and ordinary file search. Add deterministic metadata queries when filenames stop answering exact questions. Add link traversal when relationships matter. Add QMD when vocabulary drift makes exact search miss useful notes. Add browser clipping when important evidence lives on signed-in or rendered surfaces. Add PDF ingestion when documents mix native text, scans, screenshots, and visual evidence. Each layer is optional because the lower layer remains readable on its own.
 
 The limits are equally modular. Capture records what a selected surface exposed; it does not decide whether the source deserves trust. A wikilink records a relationship, not agreement. Metadata encodes an author's classification, not an objective fact. Semantic similarity supplies candidates, not conclusions. The durable part is the inspectable record and the discipline of revising it. With those in place, the next coding agent can begin from maintained evidence and decisions instead of reconstructing them from a previous chat.
 <!-- article:a-durable-knowledge-base-is-a-write-path:end -->
@@ -104,10 +108,10 @@ The limits are equally modular. Capture records what a selected surface exposed;
 
 [Bun](https://bun.sh/docs/installation) is the required runtime.
 
-Install the CLI from the immutable `v0.2.2` tag:
+Install the CLI from the immutable `v0.3.0` tag:
 
 ```sh
-bun add --global github:CCLRTE/kb#v0.2.2
+bun add --global github:CCLRTE/kb#v0.3.0
 kb --help
 ```
 
@@ -116,7 +120,7 @@ For programmatic use, declare the same pinned source in a project:
 ```json
 {
   "dependencies": {
-    "@cclrte/kb": "github:CCLRTE/kb#v0.2.2"
+    "@cclrte/kb": "github:CCLRTE/kb#v0.3.0"
   }
 }
 ```
@@ -131,7 +135,7 @@ bun link
 kb --help
 ```
 
-HTTP capture works with the installed JavaScript dependencies. Rendered capture additionally needs a local Chromium-compatible browser. Full audio or video localization needs [yt-dlp](https://github.com/yt-dlp/yt-dlp), and some formats also need [FFmpeg](https://ffmpeg.org).
+HTTP capture works with the installed JavaScript dependencies. Rendered capture additionally needs a local Chromium-compatible browser. [yt-dlp](https://github.com/yt-dlp/yt-dlp) adds YouTube metadata, thumbnails, and transcripts; full audio or video localization is opt-in and some formats also need [FFmpeg](https://ffmpeg.org). PDF ingestion uses the open-source Poppler tools `pdfinfo` and `pdftohtml`; [Tesseract](https://github.com/tesseract-ocr/tesseract) adds local OCR for scans and screenshots.
 
 Semantic search uses [QMD](https://github.com/tobi/qmd) and its recommended compact local EmbeddingGemma model. The first `kb index` or semantic `kb search` downloads the model (about 300 MB); keyword search and every structural command work without it.
 
@@ -154,6 +158,7 @@ kb check --root .
 | `kb init [directory]` | Create a new vault without merging into or overwriting an existing path; the default directory is `kb`. |
 | `kb clip <url\|current>` | Capture a source and write an article bundle. `current` reads an attached active tab without navigating it; `kb capture <url>` is the explicit URL form. |
 | `kb inspect <url>` | Run acquisition and extraction without writing a bundle. |
+| `kb pdf <file> [--slug <slug>]` | Convert a local PDF into Markdown while retaining the original file, extracted images, OCR-derived text, and page provenance. |
 | `kb refresh --root <directory>` | Rebuild the managed catalog atomically and report graph findings. |
 | `kb check --root <directory>` | Verify that the catalog is current and that graph policy passes without changing files. |
 | `kb graph --root <directory>` | Print the resolved contextual graph, broken or ambiguous links, orphans, and advisory mention candidates. |
@@ -184,7 +189,15 @@ To open a URL with state from a path-backed Chromium profile, pass its path. The
 kb clip https://example.com/private --browser-profile <path> --output articles
 ```
 
-Each capture writes readable Markdown, `capture.json`, localized assets, and optional evidence under `articles/<slug>/`. See [Capture web content](docs/capture.md) for scopes, saved files, browser modes, media, evidence, completeness states, and limits.
+Each web capture writes readable Markdown, `capture.json`, localized assets, and optional evidence under `articles/<slug>/`. Unless media is disabled, YouTube captures add the title, description, duration, channel, thumbnail, and a locally extracted transcript when available; other video surfaces retain a poster or thumbnail instead of downloading the video by default. See [Capture web content](docs/capture.md) for scopes, saved files, browser modes, media, evidence, completeness states, and limits.
+
+PDF capture uses the same bundle boundary:
+
+```sh
+kb pdf "/absolute/path/to/document.pdf" --output articles
+```
+
+The bundle includes byte-identical `source.pdf`, readable Markdown, `capture.json`, and content-addressed extracted images. A reviewed second pass also retains its hash-bound `annotations.json`. See [Capture PDF documents](docs/pdf.md) for heading inference, OCR, screenshot metadata, completeness, and review.
 
 ## Graph reference
 
@@ -192,10 +205,10 @@ Vault-root wikilinks such as `[[notes/context-engineering|context engineering]]`
 
 Frontmatter retains nested objects, arrays, finite numbers with safe integer precision, booleans, strings, and nulls. `kb list --where type=plan --tag ingestion --sort metadata.updated --order desc` answers exact questions from that authored data. Unquoted `true`, `false`, `null`, and numeric filter values are typed; keep the quotes inside the argument to match a string with the same spelling, for example `kb list --where 'external_id="9007199254740993"'`. QMD search is a discovery layer: each match is joined back to the live metadata and graph view, and similarity never becomes a link automatically.
 
-The package exports its full programmatic surface from `@cclrte/kb`; focused entry points from `@cclrte/kb/graph`, `@cclrte/kb/navigation`, `@cclrte/kb/query`, and `@cclrte/kb/semantic`; capture orchestration and diagnostics from `@cclrte/kb/capture`; and reusable disposable-profile helpers from `@cclrte/kb/browser-profiles`. Embedders that need the CLI's lower-level ingestion machinery can use the explicit capture-primitive subpaths listed in `package.json`, including `@cclrte/kb/clip/acquire`, `@cclrte/kb/clip/args`, and `@cclrte/kb/clip/network-proxy`.
+The package exports its full programmatic surface from `@cclrte/kb`; focused entry points from `@cclrte/kb/graph`, `@cclrte/kb/navigation`, `@cclrte/kb/query`, and `@cclrte/kb/semantic`; web-capture orchestration and diagnostics from `@cclrte/kb/capture`; PDF ingestion from `@cclrte/kb/pdf`; and reusable disposable-profile helpers from `@cclrte/kb/browser-profiles`. Embedders that need the CLI's lower-level ingestion machinery can use the explicit capture-primitive subpaths listed in `package.json`, including `@cclrte/kb/clip/acquire`, `@cclrte/kb/clip/args`, and `@cclrte/kb/clip/network-proxy`.
 
 ## Agent skills
 
-The repository and packed package ship four reusable Agent Skills under `skills/`: `save-url-kb` for auditable ingestion, `refresh-kb` for graph maintenance, `query-kb` for choosing exact, structural, keyword, or semantic retrieval, and `plan-kb` for creating and growing durable implementation plans. Copy or link a skill directory into the location used by your agent runner. They invoke the installed `kb` command and do not depend on a repository checkout path.
+The repository and packed package ship five reusable Agent Skills under `skills/`: `save-url-kb` for auditable web ingestion, `save-pdf-kb` for local PDF conversion, `refresh-kb` for graph maintenance, `query-kb` for choosing exact, structural, keyword, or semantic retrieval, and `plan-kb` for creating and growing durable implementation plans. Copy or link a skill directory into the location used by your agent runner. They invoke the installed `kb` command and do not depend on a repository checkout path.
 
-See [Design](docs/design.md), [Agent workflow](docs/agent-workflow.md), and [Contributing](CONTRIBUTING.md) for the durable contracts and development gate. CCLRTE/kb is available under the [MIT License](LICENSE).
+See [Design](docs/design.md), [Agent workflow](docs/agent-workflow.md), [PDF capture](docs/pdf.md), and [Contributing](CONTRIBUTING.md) for the durable contracts and development gate. CCLRTE/kb is available under the [MIT License](LICENSE).

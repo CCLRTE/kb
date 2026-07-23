@@ -95,7 +95,16 @@ With the resolved output path, `kb clip` installs one atomic bundle under
 
 The Markdown is the readable source record. `capture.json` records the source and canonical URLs, acquisition attempts, selected extractor, status, counts, warnings, localized asset hashes, and requested evidence outcomes. A partial failure can preserve useful source text without overstating completeness.
 
-`--media all` localizes accessible, non-DRM audio or video when yt-dlp is installed. Source evidence is stored as sanitized inert HTML. Screenshots are viewport pixels and can include everything visible in the tab, so inspect them before retaining or sharing a bundle.
+The normal image route localizes inline images from ordinary pages and rendered
+social posts, including X and LinkedIn, plus exposed video posters or
+thumbnails. For YouTube, the default capture (unless `--media none`) asks
+yt-dlp for the title, description, duration, channel, local thumbnail, and one
+available exact-language transcript. `--media all` additionally localizes
+accessible, non-DRM audio or video; the full payload is never downloaded by
+default. Missing optional metadata or transcript regions remain explicit in
+the capture status and warnings.
+
+Source evidence is stored as sanitized inert HTML. Screenshots are viewport pixels and can include everything visible in the tab, so inspect them before retaining or sharing a bundle.
 
 ## Report completeness literally
 

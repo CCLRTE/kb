@@ -270,6 +270,15 @@ function manifest(): CaptureManifestInput {
     artifacts: {
       images: { requested: false, status: "not-requested", files: 0 },
       media: { requested: false, status: "not-requested", files: 0 },
+      videoContext: {
+        requested: false,
+        status: "not-requested",
+        thumbnailPath: null,
+        transcriptLanguage: null,
+        transcriptCueCount: 0,
+        transcriptTruncated: false,
+        metadata: null,
+      },
     },
     evidence: {
       requested: "none",
@@ -312,7 +321,7 @@ test("stages and atomically commits a deterministic capture bundle", () => {
     },
     sourceHtml: "<html><body><article>Useful source</article></body></html>",
   });
-  expect(stored.schemaVersion).toBe(2);
+  expect(stored.schemaVersion).toBe(3);
   const target = commitCaptureBundle(transaction);
 
   expect(target).toBe(join(realpathSync(root), "useful-source"));
@@ -360,7 +369,7 @@ test("force safely upgrades an owned schema-1 bundle", () => {
   const transaction = beginCaptureBundle({ outputRoot: root, slug: "legacy-capture", force: true });
   writeCaptureBundle(transaction, { markdown: "upgraded", manifest: manifest() });
   const upgraded = commitCaptureBundle(transaction);
-  expect(JSON.parse(readFileSync(join(upgraded, CAPTURE_MANIFEST_FILENAME), "utf8"))).toMatchObject({ schemaVersion: 2 });
+  expect(JSON.parse(readFileSync(join(upgraded, CAPTURE_MANIFEST_FILENAME), "utf8"))).toMatchObject({ schemaVersion: 3 });
 });
 
 test("force restores the old target when installation fails after backup", () => {

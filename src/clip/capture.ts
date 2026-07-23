@@ -30,9 +30,17 @@ import {
   CONTENT_REWRITE_TRUNCATION_WARNING,
   rewriteContentWithStatus,
   slugify,
+  type Article,
 } from "./lib.js";
 import { filterCookies, renderCookieHeader } from "./cookies.js";
-import { captureMedia, type MediaCaptureResult, type MediaRecord } from "./media.js";
+import {
+  captureMedia,
+  captureVideoContext,
+  type MediaCaptureResult,
+  type MediaMetadata,
+  type MediaRecord,
+  type VideoContextCaptureResult,
+} from "./media.js";
 import {
   abortCaptureBundle,
   beginCaptureBundle,
@@ -88,6 +96,7 @@ export type CaptureDependencies = {
   readonly extractPage?: typeof extractPage;
   readonly localizeAssets?: typeof localizeAssets;
   readonly captureMedia?: typeof captureMedia;
+  readonly captureVideoContext?: typeof captureVideoContext;
   readonly now?: () => Date;
 };
 
@@ -268,17 +277,23 @@ function screenshotIntoBundle(
   return "evidence/page.png";
 }
 
-const mediaManifestAssets = (
-  result: MediaCaptureResult,
+const mediaRecordManifestAsset = (
+  record: MediaRecord,
   sourceUrl: string,
-): readonly CaptureManifestAsset[] => result.records.map((record) => ({
+): CaptureManifestAsset => ({
   source: sourceUrl,
   url: sourceUrl,
   path: record.path,
   mimeType: record.mimeType,
   bytes: record.bytes,
   sha256: record.sha256,
-}));
+});
+
+const mediaManifestAssets = (
+  result: MediaCaptureResult,
+  sourceUrl: string,
+): readonly CaptureManifestAsset[] => result.records.map((record) =>
+  mediaRecordManifestAsset(record, sourceUrl));
 
 function safeMediaPath(path: string): string | null {
   if (path === "" || path.startsWith("/") || /[\\\0\r\n?#]/.test(path)) return null;
@@ -301,6 +316,74 @@ export function appendCapturedMedia(content: string, records: readonly MediaReco
   }
   if (lines.length === 0) return content;
   return `${content.trimEnd()}\n\n## Media\n\n${lines.join("\n\n")}\n`;
+}
+
+function escapedVideoMetadata(value: string): string {
+  return value
+    .replace(/\\/gu, "\\\\")
+    .replace(/([`*_[\]<>#])/gu, "\\$1");
+}
+
+function videoDuration(value: number): string {
+  const totalSeconds = Math.max(0, Math.floor(value));
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  return hours > 0
+    ? `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+    : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+/** Add durable YouTube metadata, a local thumbnail, and a bounded transcript to readable Markdown. */
+export function appendVideoContext(content: string, context: VideoContextCaptureResult): string {
+  const metadata = context.metadata;
+  const details: string[] = [];
+  if (metadata?.title !== undefined) details.push(`- **Title:** ${escapedVideoMetadata(metadata.title)}`);
+  const channel = metadata?.channel ?? metadata?.uploader;
+  if (channel !== undefined) details.push(`- **Channel:** ${escapedVideoMetadata(channel)}`);
+  if (metadata?.durationSeconds !== undefined) {
+    details.push(`- **Duration:** ${videoDuration(metadata.durationSeconds)}`);
+  }
+  if (metadata?.id !== undefined) details.push(`- **Video ID:** ${escapedVideoMetadata(metadata.id)}`);
+
+  const thumbnailPath = context.thumbnail === null ? null : safeMediaPath(context.thumbnail.path);
+  const sections: string[] = [];
+  if (details.length > 0 || thumbnailPath !== null || metadata?.description !== undefined) {
+    const video: string[] = ["## Video"];
+    if (details.length > 0) video.push("", details.join("\n"));
+    if (thumbnailPath !== null) video.push("", `![Video thumbnail](${thumbnailPath})`);
+    if (metadata?.description !== undefined && metadata.description.trim() !== "") {
+      const description = metadata.description
+        .split(/\r?\n/gu)
+        .map(escapedVideoMetadata)
+        .join("\n");
+      video.push("", "### Description", "", description);
+    }
+    sections.push(video.join("\n"));
+  }
+  if (context.transcript !== null && context.transcript.markdown.trim() !== "") {
+    sections.push(`## Transcript\n\n${context.transcript.markdown.trimEnd()}`);
+  }
+  return sections.length === 0
+    ? content
+    : `${content.trimEnd()}\n\n${sections.join("\n\n")}\n`;
+}
+
+function articleWithVideoMetadata(article: Article, metadata: MediaMetadata | null): Article {
+  if (metadata === null) return article;
+  const published = metadata.timestamp === undefined
+    ? article.published
+    : (() => {
+        const date = new Date(metadata.timestamp * 1_000);
+        return Number.isFinite(date.getTime()) ? date.toISOString() : article.published;
+      })();
+  return {
+    content: article.content,
+    title: metadata.title ?? article.title,
+    author: metadata.channel ?? metadata.uploader ?? article.author,
+    published,
+    description: metadata.description ?? article.description,
+  };
 }
 
 function cookieMediaOptions(options: CaptureArguments): {
@@ -391,6 +474,7 @@ export async function runCapture(
     extractPage: dependencies.extractPage ?? extractPage,
     localizeAssets: dependencies.localizeAssets ?? localizeAssets,
     captureMedia: dependencies.captureMedia ?? captureMedia,
+    captureVideoContext: dependencies.captureVideoContext ?? captureVideoContext,
     now: dependencies.now ?? (() => new Date()),
   };
   const browserTemporaryDirectory = mkdtempSync(join(tmpdir(), "cclrte-kb-browser-"));
@@ -611,27 +695,63 @@ export async function runCapture(
       ];
       const status = statusAfterContentRewrite(best.status, localized.truncated);
       const manifestAssets: CaptureManifestAsset[] = [...localized.assets];
+      let videoContext: VideoContextCaptureResult | null = null;
+      let videoContextStatus: CaptureManifestInput["artifacts"]["videoContext"]["status"] = "not-requested";
+      const videoContextRequested = best.platform === "youtube" && options.media !== "none";
+      if (videoContextRequested) {
+        const usedBytes = manifestAssets.reduce((sum, asset) => sum + asset.bytes, 0);
+        const remainingBytes = options.maxTotalAssetBytes - usedBytes;
+        if (remainingBytes < 1) {
+          videoContextStatus = "partial";
+          combinedWarnings.push("Skipped YouTube thumbnail and transcript because the configured asset byte budget was exhausted.");
+        } else {
+          videoContext = await deps.captureVideoContext({
+            url: best.canonicalUrl,
+            outputDirectory: join(transaction.assetsDirectory, "video"),
+            relativePrefix: "assets/video",
+            timeoutMs: options.timeoutMs,
+            maxFileBytes: Math.min(options.maxAssetBytes, remainingBytes),
+            maxTotalBytes: remainingBytes,
+            allowPrivateNetwork: options.allowPrivateNetwork,
+            maxFiles: Math.max(3, Math.min(options.maxItems, 12)),
+            userAgent: options.userAgent,
+            ...cookieMediaOptions(options),
+          });
+          videoContextStatus = videoContext.status === "captured" && videoContext.warnings.length > 0
+            ? "partial"
+            : videoContext.status;
+          if (videoContext.thumbnail !== null) {
+            manifestAssets.push(mediaRecordManifestAsset(videoContext.thumbnail, best.canonicalUrl.href));
+          }
+          combinedWarnings.push(...videoContext.warnings);
+        }
+      }
       let mediaRecords: readonly MediaRecord[] = [];
       let mediaStatus: CaptureManifestInput["artifacts"]["media"]["status"] = "not-requested";
       if (options.media === "all") {
-        const usedBytes = localized.assets.reduce((sum, asset) => sum + asset.bytes, 0);
-        const remainingBytes = Math.max(1, options.maxTotalAssetBytes - usedBytes);
-        const media = await deps.captureMedia({
-          url: best.canonicalUrl,
-          outputDirectory: join(transaction.assetsDirectory, "media"),
-          relativePrefix: "assets/media",
-          timeoutMs: options.timeoutMs,
-          maxFileBytes: Math.min(options.maxAssetBytes, remainingBytes),
-          maxTotalBytes: remainingBytes,
-          allowPrivateNetwork: options.allowPrivateNetwork,
-          maxFiles: Math.min(options.maxItems, 100),
-          userAgent: options.userAgent,
-          ...cookieMediaOptions(options),
-        });
-        mediaStatus = media.status === "captured" && media.warnings.length > 0 ? "partial" : media.status;
-        mediaRecords = media.records;
-        manifestAssets.push(...mediaManifestAssets(media, best.canonicalUrl.href));
-        combinedWarnings.push(...media.warnings);
+        const usedBytes = manifestAssets.reduce((sum, asset) => sum + asset.bytes, 0);
+        const remainingBytes = options.maxTotalAssetBytes - usedBytes;
+        if (remainingBytes < 1) {
+          mediaStatus = "partial";
+          combinedWarnings.push("Skipped full media because the configured asset byte budget was exhausted.");
+        } else {
+          const media = await deps.captureMedia({
+            url: best.canonicalUrl,
+            outputDirectory: join(transaction.assetsDirectory, "media"),
+            relativePrefix: "assets/media",
+            timeoutMs: options.timeoutMs,
+            maxFileBytes: Math.min(options.maxAssetBytes, remainingBytes),
+            maxTotalBytes: remainingBytes,
+            allowPrivateNetwork: options.allowPrivateNetwork,
+            maxFiles: Math.min(options.maxItems, 100),
+            userAgent: options.userAgent,
+            ...cookieMediaOptions(options),
+          });
+          mediaStatus = media.status === "captured" && media.warnings.length > 0 ? "partial" : media.status;
+          mediaRecords = media.records;
+          manifestAssets.push(...mediaManifestAssets(media, best.canonicalUrl.href));
+          combinedWarnings.push(...media.warnings);
+        }
       }
 
       const requestedScreenshot = options.evidence === "screenshot" || options.evidence === "all";
@@ -646,11 +766,15 @@ export async function runCapture(
             : "A screenshot was requested but no valid bounded PNG was captured.",
         );
       }
-      const redactedMarkdown = redactSensitiveTextWithCount(buildClipMarkdown(best.article, {
+      const article = articleWithVideoMetadata(best.article, videoContext?.metadata ?? null);
+      const contentWithVideo = videoContext === null
+        ? localized.content
+        : appendVideoContext(localized.content, videoContext);
+      const redactedMarkdown = redactSensitiveTextWithCount(buildClipMarkdown(article, {
         slug,
         sourceHref: best.canonicalUrl.href,
         clipped: capturedAt.slice(0, 10),
-        content: appendCapturedMedia(localized.content, mediaRecords),
+        content: appendCapturedMedia(contentWithVideo, mediaRecords),
         platform: best.platform,
         captureStatus: status,
         captureMethod: best.acquisition.method,
@@ -692,6 +816,15 @@ export async function runCapture(
             requested: options.media === "all",
             status: mediaStatus,
             files: mediaRecords.length,
+          },
+          videoContext: {
+            requested: videoContextRequested,
+            status: videoContextStatus,
+            thumbnailPath: videoContext?.thumbnail?.path ?? null,
+            transcriptLanguage: videoContext?.transcript?.language ?? null,
+            transcriptCueCount: videoContext?.transcript?.cueCount ?? 0,
+            transcriptTruncated: videoContext?.transcript?.truncated ?? false,
+            metadata: videoContext?.metadata ?? null,
           },
         },
         evidence: {

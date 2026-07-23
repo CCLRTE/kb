@@ -43,6 +43,9 @@ describe("clip doctor", () => {
       agentExecutable,
       "/Applications/Google Chrome.app",
       join(homeDirectory, ".local", "bin", "yt-dlp"),
+      "/opt/homebrew/bin/pdfinfo",
+      "/opt/homebrew/bin/pdftohtml",
+      "/opt/homebrew/bin/tesseract",
     ]);
     const commands: string[][] = [];
     const run = ({ command }: DiagnosticCommand) => {
@@ -69,6 +72,15 @@ describe("clip doctor", () => {
       }
       if (command[0]?.endsWith("yt-dlp")) {
         return Promise.resolve({ stdout: "2026.03.17\n", stderr: "", exitCode: 0 });
+      }
+      if (command[0]?.endsWith("pdfinfo")) {
+        return Promise.resolve({ stdout: "", stderr: "pdfinfo version 25.07.0\n", exitCode: 0 });
+      }
+      if (command[0]?.endsWith("pdftohtml")) {
+        return Promise.resolve({ stdout: "", stderr: "pdftohtml version 25.07.0\n", exitCode: 0 });
+      }
+      if (command[0]?.endsWith("tesseract")) {
+        return Promise.resolve({ stdout: "tesseract 5.5.1\n", stderr: "", exitCode: 0 });
       }
       return Promise.reject(new Error(`unexpected command: ${command.join(" ")}`));
     };
@@ -105,6 +117,18 @@ describe("clip doctor", () => {
     expect(report.chromeProfileNames).toEqual(["Personal", "Work"]);
     expect(report.tools.find(({ name }) => name === "yt-dlp")).toMatchObject({ status: "ready", version: "2026.03.17" });
     expect(report.tools.find(({ name }) => name === "ffmpeg")?.status).toBe("unavailable");
+    expect(report.tools.find(({ name }) => name === "pdfinfo")).toMatchObject({
+      status: "ready",
+      version: "pdfinfo version 25.07.0",
+    });
+    expect(report.tools.find(({ name }) => name === "pdftohtml")).toMatchObject({
+      status: "ready",
+      version: "pdftohtml version 25.07.0",
+    });
+    expect(report.tools.find(({ name }) => name === "tesseract")).toMatchObject({
+      status: "ready",
+      version: "tesseract 5.5.1",
+    });
     expect(JSON.stringify(report)).not.toContain("never-report-me");
     expect(JSON.stringify(report)).not.toContain("/secret/chrome");
     expect(commands.every((command) => command.every((argument) => !/cookie|keychain/i.test(argument)))).toBeTrue();
@@ -128,6 +152,8 @@ describe("clip doctor", () => {
     expect(rendered).toContain("Cookie/keychain probe: not performed");
     expect(rendered).toContain("Install Google Chrome or Chromium for rendered capture");
     expect(rendered).toContain("Install yt-dlp");
+    expect(rendered).toContain("kb pdf requires both pdfinfo and pdftohtml");
+    expect(rendered).toContain("kb pdf still preserves native text and images without OCR");
   });
 
   test("discovers Chromium on Linux through an injected executable lookup", async () => {
@@ -188,6 +214,8 @@ test("adapter matrix names every promised surface and communicates bounded acces
   expect(rendered).toContain("site-specific item trees are not inferred generically");
   expect(rendered).toContain("current browser tab");
   expect(rendered).toContain("ingestion-only");
+  expect(rendered).toContain("yt-dlp metadata + thumbnail + transcript");
+  expect(rendered).toContain("Full audio/video download remains opt-in with --media all");
 });
 
 test("diagnostic timeouts escalate to SIGKILL when a child ignores SIGTERM", async () => {

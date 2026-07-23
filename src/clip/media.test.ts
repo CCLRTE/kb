@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -16,9 +17,12 @@ import { join, relative, resolve } from "node:path";
 import {
   buildMediaCookieOptions,
   captureMedia,
+  captureVideoContext,
   createMediaCookieProvider,
+  discoverNodeRuntime,
   discoverYtDlp,
   parseMediaMetadata,
+  parseWebVtt,
   runMediaCommand,
   sniffMediaMimeType,
 } from "./media.js";
@@ -45,6 +49,8 @@ describe("media metadata", () => {
       description: "A description",
       uploader: "Creator",
       uploader_id: "creator-id",
+      channel: "Creator channel",
+      channel_id: "creator-channel-id",
       webpage_url: "https://user:password@example.com/private",
       extractor: "fixture",
       duration: 12.5,
@@ -58,6 +64,8 @@ describe("media metadata", () => {
       description: "A description",
       uploader: "Creator",
       uploaderId: "creator-id",
+      channel: "Creator channel",
+      channelId: "creator-channel-id",
       extractor: "fixture",
       durationSeconds: 12.5,
       timestamp: 1_721_234_567,
@@ -103,6 +111,64 @@ test("discovers yt-dlp from PATH before common local paths", () => {
     which: () => null,
     exists: (path) => path === "/home/person/.local/bin/yt-dlp",
   })).toBe("/home/person/.local/bin/yt-dlp");
+});
+
+test("discovers only Node.js 22 or newer for yt-dlp JavaScript runtime support", () => {
+  expect(discoverNodeRuntime({
+    homeDirectory: "/home/person",
+    which: () => "/tools/node",
+    exists: (path) => path === "/tools/node",
+    readVersion: () => "v22.14.0",
+  })).toBe("/tools/node");
+  expect(discoverNodeRuntime({
+    homeDirectory: "/home/person",
+    which: () => "/tools/node",
+    exists: (path) => path === "/tools/node",
+    readVersion: () => "v20.19.0",
+  })).toBeNull();
+});
+
+describe("WebVTT transcripts", () => {
+  test("deduplicates rolling YouTube captions into timestamped Markdown", () => {
+    expect(parseWebVtt([
+      "WEBVTT",
+      "",
+      "00:00:00.000 --> 00:00:02.000",
+      "<c>Hello</c>",
+      "",
+      "00:00:01.000 --> 00:00:03.000",
+      "Hello world",
+      "",
+      "00:00:02.000 --> 00:00:04.000",
+      "world again",
+      "",
+      "00:00:03.000 --> 00:00:05.000",
+      "again",
+      "",
+    ].join("\n"))).toEqual({
+      markdown: "- [00:00] Hello\n- [00:01] world\n- [00:02] again\n",
+      cueCount: 3,
+      truncated: false,
+    });
+  });
+
+  test("bounds cue count and renders foreign Markdown as literal transcript text", () => {
+    const parsed = parseWebVtt([
+      "WEBVTT",
+      "",
+      "00:00.000 --> 00:01.000",
+      "![unsafe](javascript:alert(1)) <b>first</b>",
+      "",
+      "00:01.000 --> 00:02.000",
+      "second",
+      "",
+    ].join("\n"), { maxCues: 1 });
+    expect(parsed).toEqual({
+      markdown: "- [00:00] !\\[unsafe\\](javascript:alert(1)) first\n",
+      cueCount: 1,
+      truncated: true,
+    });
+  });
 });
 
 test("maps Arc and other Chromium selections through Sweet Cookie's Chrome backend", () => {
@@ -183,6 +249,7 @@ describe("yt-dlp capture", () => {
     const bytes = Uint8Array.from([0, 0, 0, 20, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]);
     let command: string[] = [];
     let standardInput: string | undefined;
+    let workingDirectory: string | undefined;
     const result = await captureMedia({
       url: new URL("https://video.example/watch?id=1"),
       outputDirectory,
@@ -195,6 +262,7 @@ describe("yt-dlp capture", () => {
       run: (specification) => {
         command = [...specification.command];
         standardInput = specification.stdin;
+        workingDirectory = specification.cwd;
         writeFileSync(join(specification.monitoredDirectory, "media-post.mp4"), bytes);
         return Promise.resolve({
           stdout: `CLIP_MEDIA_JSON\t${JSON.stringify({
@@ -204,7 +272,7 @@ describe("yt-dlp capture", () => {
             duration: 9,
           })}\n`,
           stderr: "",
-          exitCode: 0,
+          exitCode: 101,
         });
       },
     });
@@ -238,7 +306,12 @@ describe("yt-dlp capture", () => {
     expect(command[command.indexOf("--proxy") + 1]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
     expect(command).not.toContain("--cookies");
     expect(command).not.toContain("--cookies-from-browser");
+    expect(command).not.toContain("--trim-filenames");
     expect(command[command.indexOf("--batch-file") + 1]).toBe("-");
+    expect(command[command.indexOf("--output") + 1]).toBe("media-%(id).80B.%(ext)s");
+    expect(workingDirectory).toBeDefined();
+    expect(workingDirectory).toBe(resolve(workingDirectory ?? ""));
+    expect(workingDirectory === undefined ? "" : relative(realpathSync(outputDirectory), workingDirectory)).not.toStartWith("..");
     expect(command).not.toContain("https://video.example/watch?id=1");
     expect(standardInput).toBe("https://video.example/watch?id=1\n");
   });
@@ -463,6 +536,167 @@ describe("yt-dlp capture", () => {
   });
 });
 
+describe("yt-dlp video context", () => {
+  test("captures only a thumbnail, exact-language transcript, and allowlisted video metadata", async () => {
+    const outputDirectory = temporaryDirectory();
+    const thumbnailBytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    let command: readonly string[] = [];
+    let standardInput: string | undefined;
+    let workingDirectory: string | undefined;
+    const result = await captureVideoContext({
+      url: new URL("https://video.example/watch?id=1&token=private"),
+      outputDirectory,
+      relativePrefix: "assets/media",
+      timeoutMs: 15_000,
+      maxFileBytes: 4_096,
+      maxTotalBytes: 8_192,
+      executable: "/fake/yt-dlp",
+      nodeExecutable: "/fake/node",
+      exists: (path) => path === "/fake/yt-dlp" || path === "/fake/node",
+      readNodeVersion: () => "v22.14.0",
+      run: (specification) => {
+        command = specification.command;
+        standardInput = specification.stdin;
+        workingDirectory = specification.cwd;
+        writeFileSync(join(specification.monitoredDirectory, "thumbnail-video.webp"), thumbnailBytes);
+        writeFileSync(join(specification.monitoredDirectory, "transcript-video.en.vtt"), [
+          "WEBVTT",
+          "",
+          "00:00.000 --> 00:02.000",
+          "Hello",
+          "",
+          "00:01.000 --> 00:03.000",
+          "Hello world",
+          "",
+        ].join("\n"));
+        return Promise.resolve({
+          stdout: `CLIP_MEDIA_JSON\t${JSON.stringify({
+            id: "video",
+            title: "Video title",
+            description: "Video description",
+            uploader: "Uploader",
+            uploader_id: "uploader-id",
+            channel: "Video channel",
+            channel_id: "channel-id",
+            webpage_url: "https://video.example/watch?id=1",
+            extractor: "fixture",
+            duration: 123,
+          })}\n`,
+          stderr: "",
+          exitCode: 101,
+        });
+      },
+    });
+
+    const digest = createHash("sha256").update(thumbnailBytes).digest("hex");
+    expect(result).toEqual({
+      status: "captured",
+      thumbnail: {
+        path: `assets/media/${digest}.png`,
+        mimeType: "image/png",
+        bytes: thumbnailBytes.byteLength,
+        sha256: digest,
+      },
+      transcript: {
+        language: "en",
+        markdown: "- [00:00] Hello\n- [00:01] world\n",
+        cueCount: 2,
+        truncated: false,
+      },
+      metadata: {
+        id: "video",
+        title: "Video title",
+        description: "Video description",
+        uploader: "Uploader",
+        uploaderId: "uploader-id",
+        channel: "Video channel",
+        channelId: "channel-id",
+        webpageUrl: "https://video.example/watch?id=1",
+        extractor: "fixture",
+        durationSeconds: 123,
+      },
+      warnings: [],
+    });
+    expect(existsSync(join(outputDirectory, `${digest}.png`))).toBeTrue();
+    expect(readdirSync(outputDirectory).some((name) => name.endsWith(".vtt"))).toBeFalse();
+    expect(command).toContain("--skip-download");
+    expect(command).toContain("--no-simulate");
+    expect(command).toContain("--write-thumbnail");
+    expect(command).toContain("--write-subs");
+    expect(command).toContain("--write-auto-subs");
+    expect(command[command.indexOf("--sub-langs") + 1]).toBe("en");
+    expect(command[command.indexOf("--sub-format") + 1]).toBe("vtt");
+    expect(command[command.indexOf("--js-runtimes") + 1]).toBe("node:/fake/node");
+    expect(command[command.indexOf("--print") + 1]).toStartWith("CLIP_MEDIA_JSON\t");
+    expect(command[command.indexOf("--print") + 1]).not.toContain("after_move:");
+    expect(command).not.toContain("--downloader");
+    expect(command).not.toContain("--trim-filenames");
+    const outputTemplates = command
+      .flatMap((argument, index) => argument === "--output" ? [command[index + 1]] : [])
+      .filter((argument): argument is string => argument !== undefined);
+    expect(outputTemplates).toEqual([
+      "unused-%(id).80B.%(ext)s",
+      "thumbnail:thumbnail-%(id).80B.%(ext)s",
+      "subtitle:transcript-%(id).80B.%(language).16B.%(ext)s",
+    ]);
+    expect(outputTemplates.every((template) => !template.includes(outputDirectory))).toBeTrue();
+    expect(workingDirectory).toBeDefined();
+    expect(workingDirectory === undefined ? "" : relative(realpathSync(outputDirectory), workingDirectory)).not.toStartWith("..");
+    expect(command.join(" ")).not.toContain("token=private");
+    expect(standardInput).toBe("https://video.example/watch?id=1&token=private\n");
+  });
+
+  test("rejects regex-like subtitle selectors before invoking yt-dlp", async () => {
+    let invoked = false;
+    const result = await captureVideoContext({
+      url: new URL("https://video.example/watch/1"),
+      outputDirectory: temporaryDirectory(),
+      transcriptLanguage: "en.*",
+      timeoutMs: 15_000,
+      maxFileBytes: 4_096,
+      maxTotalBytes: 8_192,
+      executable: "/fake/yt-dlp",
+      exists: () => true,
+      run: () => {
+        invoked = true;
+        return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 });
+      },
+    });
+    expect(invoked).toBeFalse();
+    expect(result.status).toBe("failed");
+    expect(result.warnings.join(" ")).toContain("exact language identifier");
+  });
+
+  test("returns partial context when an otherwise successful video has no transcript", async () => {
+    const result = await captureVideoContext({
+      url: new URL("https://video.example/watch/1"),
+      outputDirectory: temporaryDirectory(),
+      transcriptLanguage: "fr",
+      timeoutMs: 15_000,
+      maxFileBytes: 4_096,
+      maxTotalBytes: 8_192,
+      executable: "/fake/yt-dlp",
+      nodeExecutable: null,
+      exists: (path) => path === "/fake/yt-dlp",
+      run: (specification) => {
+        writeFileSync(
+          join(specification.monitoredDirectory, "thumbnail-video.jpg"),
+          Uint8Array.from([0xff, 0xd8, 0xff]),
+        );
+        return Promise.resolve({
+          stdout: 'CLIP_MEDIA_JSON\t{"title":"Silent fixture","duration":4}\n',
+          stderr: "",
+          exitCode: 0,
+        });
+      },
+    });
+    expect(result.status).toBe("partial");
+    expect(result.thumbnail?.mimeType).toBe("image/jpeg");
+    expect(result.transcript).toBeNull();
+    expect(result.warnings.join(" ")).toContain("no fr transcript");
+  });
+});
+
 test("media timeouts escalate to SIGKILL when a child ignores SIGTERM", async () => {
   const directory = temporaryDirectory();
   const fixture = join(directory, "ignore-term.sh");
@@ -488,6 +722,24 @@ test("media timeouts escalate to SIGKILL when a child ignores SIGTERM", async ()
   expect(failure instanceof Error ? failure.message : "").toContain("timed out");
   expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1_800);
   expect(Date.now() - startedAt).toBeLessThan(5_000);
+});
+
+test("media commands run in their dedicated working directory", async () => {
+  const directory = temporaryDirectory();
+  const monitoredDirectory = join(directory, "output");
+  mkdirSync(monitoredDirectory);
+  const result = await runMediaCommand({
+    command: ["/bin/pwd"],
+    cwd: monitoredDirectory,
+    timeoutMs: 1_000,
+    maxOutputBytes: 4_096,
+    monitoredDirectory,
+    maxFiles: 2,
+    maxFileBytes: 1_024,
+    maxTotalBytes: 2_048,
+  });
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout.trim()).toBe(realpathSync(monitoredDirectory));
 });
 
 test("media timeouts kill a stubborn POSIX grandchild process", async () => {

@@ -1,5 +1,13 @@
 // @bun
 import {
+  canonicalizeUrl,
+  chooseBestExtraction,
+  countWords,
+  extractPage,
+  localizeAssets,
+  sniffImage
+} from "./index-tcnqv6w8.js";
+import {
   cloneBrowserProfile
 } from "./index-k3pqw1a7.js";
 import {
@@ -7,38 +15,36 @@ import {
   inspectClipEnvironment,
   renderAdapterCapabilities,
   renderDoctorReport
-} from "./index-5vt7gy7e.js";
+} from "./index-mz08nz1e.js";
 import {
-  CONTENT_REWRITE_TRUNCATION_WARNING,
   MAX_COOKIE_BYTES,
   acquireBrowser,
   acquireCookieHttp,
   acquireCookieRecords,
   acquireFile,
   acquireHttp,
-  articleMetadataLimits,
   assertSafePersistentProfile,
-  buildClipMarkdown,
-  classifyPlatformUrl,
   filterCookieProviderResult,
   filterCookies,
-  parseBlueskyCapture,
-  parseHackerNewsCapture,
-  parseRedditCapture,
   readCookieFile,
-  renderCapturedDocument,
   renderCookieHeader,
-  renderNetscapeCookieJar,
-  resolveRemote,
-  rewriteContentWithStatus,
-  scanImageSources,
-  slugify
-} from "./index-yn2qjcxe.js";
+  renderNetscapeCookieJar
+} from "./index-c1dx8x7c.js";
 import {
   startNetworkProxy
 } from "./index-k4cczfgz.js";
 import {
-  FetchFailure,
+  CONTENT_REWRITE_TRUNCATION_WARNING,
+  buildClipMarkdown,
+  classifyPlatformUrl,
+  parseBlueskyCapture,
+  parseHackerNewsCapture,
+  parseRedditCapture,
+  renderCapturedDocument,
+  rewriteContentWithStatus,
+  slugify
+} from "./index-k5h9erpt.js";
+import {
   decodeBytes,
   safeFetch
 } from "./index-kvxzb85x.js";
@@ -50,7 +56,7 @@ import {
   redactSensitiveTextWithCount,
   sanitizeArtifactUrl,
   writeCaptureBundle
-} from "./index-7x30yhyy.js";
+} from "./index-f49xpe9k.js";
 import {
   sanitizeTerminalLine,
   sanitizeTerminalText
@@ -69,845 +75,23 @@ import {
   chmodSync as chmodSync2,
   copyFileSync,
   existsSync as existsSync2,
-  mkdirSync as mkdirSync3,
+  mkdirSync as mkdirSync2,
   mkdtempSync as mkdtempSync2,
   readFileSync as readFileSync2,
   rmSync as rmSync2,
   statSync as statSync2
 } from "fs";
 import { tmpdir as tmpdir2 } from "os";
-import { join as join3 } from "path";
-
-// src/clip/assets.ts
-import { createHash } from "crypto";
-import { mkdirSync, writeFileSync } from "fs";
-import { join } from "path";
-function startsWith(bytes, signature) {
-  return signature.every((byte, index) => bytes[index] === byte);
-}
-function ascii(bytes, start, length) {
-  return new TextDecoder().decode(bytes.slice(start, start + length));
-}
-function sniffImage(bytes) {
-  if (startsWith(bytes, [137, 80, 78, 71, 13, 10, 26, 10])) {
-    return { mimeType: "image/png", extension: "png" };
-  }
-  if (startsWith(bytes, [255, 216, 255]))
-    return { mimeType: "image/jpeg", extension: "jpg" };
-  const prefix = ascii(bytes, 0, 6);
-  if (prefix === "GIF87a" || prefix === "GIF89a")
-    return { mimeType: "image/gif", extension: "gif" };
-  if (ascii(bytes, 0, 4) === "RIFF" && ascii(bytes, 8, 4) === "WEBP") {
-    return { mimeType: "image/webp", extension: "webp" };
-  }
-  if (ascii(bytes, 4, 4) === "ftyp") {
-    const brand = ascii(bytes, 8, 4);
-    if (brand === "avif" || brand === "avis")
-      return { mimeType: "image/avif", extension: "avif" };
-  }
-  return null;
-}
-function sha256(bytes) {
-  return createHash("sha256").update(bytes).digest("hex");
-}
-function inertAssetUrl(url) {
-  const inert = new URL(url);
-  inert.username = "";
-  inert.password = "";
-  inert.search = "";
-  inert.hash = "";
-  return inert.href;
-}
-function safeAssetFailure(error) {
-  if (!(error instanceof FetchFailure))
-    return "image request failed";
-  switch (error.code) {
-    case "private-network":
-      return "image request was blocked by the private-network boundary";
-    case "timeout":
-      return "image request timed out";
-    case "too-large":
-      return "image response exceeded its byte limit";
-    case "redirect":
-      return "image redirect chain was rejected";
-    case "dns":
-      return "image hostname could not be resolved";
-    case "http":
-      return "image server returned an unsuccessful response";
-    case "invalid-url":
-      return "image URL was rejected";
-    case "network":
-      return "image request failed";
-  }
-}
-async function downloadImage(source, options, maxBytes) {
-  const remote = resolveRemote(source, options.baseUrl);
-  if (remote === null)
-    return { ok: false, source, warning: "Skipped a non-web image target.", networkBytes: 0 };
-  let authenticationWarning = null;
-  let cookieHeader;
-  if (options.cookieHeaderProvider !== undefined) {
-    try {
-      cookieHeader = await options.cookieHeaderProvider(remote) ?? undefined;
-    } catch {
-      authenticationWarning = "The explicitly selected cookie source could not provide origin-scoped image cookies.";
-    }
-  }
-  try {
-    const response = await (options.fetchResource ?? safeFetch)(remote, {
-      timeoutMs: options.timeoutMs,
-      maxBytes,
-      allowPrivateNetwork: options.allowPrivateNetwork,
-      userAgent: options.userAgent,
-      referer: options.baseUrl.href,
-      accept: "image/avif,image/webp,image/png,image/jpeg,image/gif;q=0.9,*/*;q=0.1",
-      ...cookieHeader === undefined ? {} : { cookieHeader },
-      retries: 0
-    });
-    const image = sniffImage(response.bytes);
-    if (image === null) {
-      const declared = response.contentType?.split(";")[0]?.trim() ?? "unknown content type";
-      return {
-        ok: false,
-        source,
-        warning: `${authenticationWarning === null ? "" : `${authenticationWarning} `}Kept remote ${inertAssetUrl(remote)}: response was not a supported raster image (${declared})`,
-        networkBytes: response.bytes.byteLength
-      };
-    }
-    return { ok: true, source, url: response.finalUrl, bytes: response.bytes, image, networkBytes: response.bytes.byteLength };
-  } catch (error) {
-    return {
-      ok: false,
-      source,
-      warning: `${authenticationWarning === null ? "" : `${authenticationWarning} `}Kept remote ${inertAssetUrl(remote)}: ${safeAssetFailure(error)}`,
-      networkBytes: maxBytes
-    };
-  }
-}
-async function localizeAssets(content, options) {
-  const maxSources = Math.max(1, Math.min(options.maxSources ?? 1000, 1e4));
-  const discovery = scanImageSources(content, maxSources + 1);
-  const discoveredSources = [...discovery.sources].sort((left, right) => left.localeCompare(right));
-  const sources = discoveredSources.slice(0, maxSources);
-  const warnings = discoveredSources.length > sources.length ? [`Image localization stopped at ${sources.length} sources; ${discovery.truncated ? "at least " : ""}${discoveredSources.length - sources.length} additional remote image(s) remain inert links.`] : [];
-  if (discovery.truncated) {
-    warnings.push("Image discovery reached a safety limit; additional or over-limit image candidates remain inert.");
-  }
-  const rewrittenResult = (localBySource2) => {
-    const rewritten2 = rewriteContentWithStatus(content, options.baseUrl, localBySource2, {
-      maxImageSources: maxSources + 1
-    });
-    if (rewritten2.truncated)
-      warnings.push(CONTENT_REWRITE_TRUNCATION_WARNING);
-    return rewritten2;
-  };
-  if (discovery.requiresInertFallback) {
-    const rewritten2 = rewrittenResult(new Map);
-    return {
-      ...rewritten2,
-      assets: [],
-      warnings
-    };
-  }
-  if (discoveredSources.length === 0) {
-    const rewritten2 = rewrittenResult(new Map);
-    return {
-      ...rewritten2,
-      assets: [],
-      warnings
-    };
-  }
-  mkdirSync(options.assetsDirectory, { recursive: true });
-  const results = new Map;
-  const workerCount = Math.max(1, Math.min(options.concurrency ?? 4, sources.length, 16));
-  let remainingNetworkBytes = options.maxTotalAssetBytes;
-  const deadline = Date.now() + options.timeoutMs;
-  for (let cursor = 0;cursor < sources.length && remainingNetworkBytes > 0; ) {
-    const remainingTime = deadline - Date.now();
-    if (remainingTime <= 0)
-      break;
-    const batchSize = Math.min(workerCount, sources.length - cursor, remainingNetworkBytes);
-    const allocation = Math.min(options.maxAssetBytes, Math.floor(remainingNetworkBytes / batchSize));
-    const batch = sources.slice(cursor, cursor + batchSize);
-    cursor += batch.length;
-    remainingNetworkBytes -= allocation * batch.length;
-    const downloaded = await Promise.all(batch.map((source) => downloadImage(source, { ...options, timeoutMs: Math.max(1, Math.min(options.timeoutMs, remainingTime)) }, allocation)));
-    for (const result of downloaded) {
-      results.set(result.source, result);
-      remainingNetworkBytes += Math.max(0, allocation - result.networkBytes);
-    }
-  }
-  const localBySource = new Map;
-  const assetsByHash = new Map;
-  let totalBytes = 0;
-  let unattempted = 0;
-  for (const source of sources) {
-    const result = results.get(source);
-    if (result === undefined) {
-      unattempted += 1;
-      continue;
-    }
-    if (!result.ok) {
-      warnings.push(result.warning);
-      continue;
-    }
-    const digest = sha256(result.bytes);
-    const existing = assetsByHash.get(digest);
-    if (existing !== undefined) {
-      localBySource.set(source, existing.path);
-      continue;
-    }
-    if (totalBytes + result.bytes.byteLength > options.maxTotalAssetBytes) {
-      warnings.push(`Kept remote ${inertAssetUrl(result.url)}: total asset limit ${options.maxTotalAssetBytes} bytes would be exceeded`);
-      continue;
-    }
-    const filename = `${digest}.${result.image.extension}`;
-    const relativePath = `assets/${filename}`;
-    writeFileSync(join(options.assetsDirectory, filename), result.bytes, { mode: 420 });
-    totalBytes += result.bytes.byteLength;
-    const record = {
-      source: (() => {
-        const resolved = resolveRemote(source, options.baseUrl);
-        return resolved === null ? source : inertAssetUrl(resolved);
-      })(),
-      url: inertAssetUrl(result.url),
-      path: relativePath,
-      mimeType: result.image.mimeType,
-      bytes: result.bytes.byteLength,
-      sha256: digest
-    };
-    assetsByHash.set(digest, record);
-    localBySource.set(source, relativePath);
-  }
-  if (unattempted > 0) {
-    const reason = Date.now() >= deadline ? "total asset deadline" : "aggregate asset network-byte budget";
-    warnings.push(`${unattempted} remote image source(s) were not requested because the ${reason} was exhausted.`);
-  }
-  const rewritten = rewrittenResult(localBySource);
-  return {
-    ...rewritten,
-    assets: [...assetsByHash.values()].sort((left, right) => left.path.localeCompare(right.path)),
-    warnings
-  };
-}
-
-// src/clip/extract.ts
-var nonEmpty = (value) => typeof value === "string" && value.trim() !== "" ? value.trim() : null;
-var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
-var MAX_RENDERED_PAGE_FALLBACK_BYTES = 256 * 1024;
-var renderedPageTruncationMarker = "[Rendered page text truncated at the bounded fallback limit.]";
-function isWhitespaceCodeUnit(code) {
-  return code >= 9 && code <= 13 || code === 32 || code === 160 || code === 5760 || code >= 8192 && code <= 8202 || code === 8232 || code === 8233 || code === 8239 || code === 8287 || code === 12288 || code === 65279;
-}
-function utf8CodePointWidth(value, index) {
-  const first = value.charCodeAt(index);
-  if (first <= 127)
-    return { bytes: 1, codeUnits: 1 };
-  if (first <= 2047)
-    return { bytes: 2, codeUnits: 1 };
-  const second = value.charCodeAt(index + 1);
-  if (first >= 55296 && first <= 56319 && second >= 56320 && second <= 57343) {
-    return { bytes: 4, codeUnits: 2 };
-  }
-  return { bytes: 3, codeUnits: 1 };
-}
-function utf8PrefixEnd(value, maxBytes) {
-  let bytes = 0;
-  let index = 0;
-  while (index < value.length) {
-    const width = utf8CodePointWidth(value, index);
-    if (bytes + width.bytes > maxBytes)
-      break;
-    bytes += width.bytes;
-    index += width.codeUnits;
-  }
-  return index;
-}
-function boundedRenderedPageText(value, requestedByteLimit) {
-  if (typeof value !== "string")
-    return null;
-  const byteLimit = typeof requestedByteLimit === "number" && Number.isSafeInteger(requestedByteLimit) && requestedByteLimit > 0 ? Math.min(requestedByteLimit, MAX_RENDERED_PAGE_FALLBACK_BYTES) : MAX_RENDERED_PAGE_FALLBACK_BYTES;
-  const fullEnd = utf8PrefixEnd(value, byteLimit);
-  if (fullEnd === value.length) {
-    const content = value.trim();
-    return content === "" ? null : { content, truncated: false, byteLimit };
-  }
-  const detailedMarker = `
-
-${renderedPageTruncationMarker}
-`;
-  const detailedMarkerBytes = new TextEncoder().encode(detailedMarker).byteLength;
-  const marker = detailedMarkerBytes < byteLimit ? detailedMarker : byteLimit >= 3 ? "\u2026" : ".".repeat(byteLimit);
-  const markerBytes = new TextEncoder().encode(marker).byteLength;
-  const boundedEnd = utf8PrefixEnd(value, byteLimit - markerBytes);
-  const prefix = value.slice(0, boundedEnd).trim();
-  if (prefix === "")
-    return null;
-  return { content: `${prefix}${marker}`, truncated: true, byteLimit };
-}
-function boundedTrimmedSlice(value, start, end, maxCodeUnits) {
-  while (start < end && isWhitespaceCodeUnit(value.charCodeAt(start)))
-    start += 1;
-  while (end > start && isWhitespaceCodeUnit(value.charCodeAt(end - 1)))
-    end -= 1;
-  if (start === end)
-    return null;
-  if (end - start <= maxCodeUnits)
-    return value.slice(start, end);
-  let boundedEnd = start + Math.max(0, maxCodeUnits - 1);
-  const finalCode = value.charCodeAt(boundedEnd - 1);
-  if (finalCode >= 55296 && finalCode <= 56319)
-    boundedEnd -= 1;
-  return `${value.slice(start, boundedEnd)}\u2026`;
-}
-function boundedMetadata(value, maxCodeUnits) {
-  return typeof value === "string" ? boundedTrimmedSlice(value, 0, value.length, maxCodeUnits) : null;
-}
-function countWords(value) {
-  let count = 0;
-  let insideWord = false;
-  for (let index = 0;index < value.length; index += 1) {
-    if (isWhitespaceCodeUnit(value.charCodeAt(index))) {
-      insideWord = false;
-    } else if (!insideWord) {
-      count += 1;
-      insideWord = true;
-    }
-  }
-  return count;
-}
-function isAsciiWordCodeUnit(code) {
-  return code >= 48 && code <= 57 || code >= 65 && code <= 90 || code === 95 || code >= 97 && code <= 122;
-}
-function asciiCaseEqualAt(value, offset, expected, end = value.length) {
-  if (offset < 0 || offset + expected.length > end)
-    return false;
-  for (let index = 0;index < expected.length; index += 1) {
-    const actual = value.charCodeAt(offset + index);
-    const folded = actual >= 65 && actual <= 90 ? actual + 32 : actual;
-    if (folded !== expected.charCodeAt(index))
-      return false;
-  }
-  return true;
-}
-function tagHasExactCommentClass(html, start, end) {
-  const doubleQuoted = 'class="comment"';
-  const singleQuoted = "class='comment'";
-  for (let index = start;index < end; index += 1) {
-    const preceding = index === 0 ? -1 : html.charCodeAt(index - 1);
-    if (preceding >= 0 && isAsciiWordCodeUnit(preceding))
-      continue;
-    if (asciiCaseEqualAt(html, index, doubleQuoted, end) || asciiCaseEqualAt(html, index, singleQuoted, end))
-      return true;
-  }
-  return false;
-}
-function countDefuddleCommentMarkers(html) {
-  let count = 0;
-  let cursor = 0;
-  while (cursor < html.length) {
-    const start = html.indexOf("<", cursor);
-    if (start < 0)
-      break;
-    cursor = start + 1;
-    if (!asciiCaseEqualAt(html, start + 1, "div"))
-      continue;
-    const afterName = start + 4;
-    if (afterName < html.length && isAsciiWordCodeUnit(html.charCodeAt(afterName)))
-      continue;
-    const end = html.indexOf(">", afterName);
-    if (end < 0)
-      break;
-    cursor = end + 1;
-    if (tagHasExactCommentClass(html, afterName, end))
-      count += 1;
-  }
-  return count;
-}
-function countDefuddleSeparators(html) {
-  let count = 0;
-  let cursor = 0;
-  while (cursor < html.length) {
-    const start = html.indexOf("<", cursor);
-    if (start < 0)
-      break;
-    cursor = start + 1;
-    if (!asciiCaseEqualAt(html, start + 1, "hr"))
-      continue;
-    const afterName = start + 3;
-    const next = html.charCodeAt(afterName);
-    if (next === 62) {
-      count += 1;
-      cursor = afterName + 1;
-      continue;
-    }
-    if (!isWhitespaceCodeUnit(next))
-      continue;
-    const end = html.indexOf(">", afterName + 1);
-    if (end < 0)
-      break;
-    count += 1;
-    cursor = end + 1;
-  }
-  return count;
-}
-function countMarkdownMarkers(value, kind, limit) {
-  const prefix = kind === "image" ? "![" : "[";
-  let count = 0;
-  let cursor = 0;
-  while (count < limit && cursor < value.length) {
-    const start = value.indexOf(prefix, cursor);
-    if (start < 0)
-      break;
-    const openBracket = kind === "image" ? start + 1 : start;
-    const closeBracket = value.indexOf("]", openBracket + 1);
-    if (closeBracket < 0)
-      break;
-    const nonEmptyLinkLabel = kind === "image" || closeBracket > openBracket + 1;
-    if (nonEmptyLinkLabel && value.charCodeAt(closeBracket + 1) === 40) {
-      count += 1;
-      cursor = closeBracket + 2;
-    } else {
-      cursor = start + prefix.length;
-    }
-  }
-  return count;
-}
-function defuddleWorkerUrl(moduleUrl = import.meta.url) {
-  return moduleUrl.endsWith(".ts") ? new URL("./defuddle-worker.ts", moduleUrl) : new URL("./clip/defuddle-worker.js", moduleUrl);
-}
-async function runDefuddleWorker(acquisition, scope, timeoutMs) {
-  const worker = new Worker(defuddleWorkerUrl().href, { type: "module" });
-  let timeout;
-  try {
-    const result = await new Promise((resolve, reject) => {
-      timeout = setTimeout(() => {
-        reject(new Error(`Defuddle exceeded the ${timeoutMs}ms extraction deadline.`));
-      }, timeoutMs);
-      worker.onmessage = (event) => {
-        const message = event.data;
-        if (!isRecord(message) || typeof message.ok !== "boolean") {
-          reject(new Error("Defuddle worker returned malformed data."));
-          return;
-        }
-        if (message.ok === true && isRecord(message.value)) {
-          resolve({ ok: true, value: message.value });
-          return;
-        }
-        resolve({
-          ok: false,
-          message: typeof message.message === "string" ? message.message.slice(0, 1000) : "Defuddle worker failed."
-        });
-      };
-      worker.onerror = () => reject(new Error("Defuddle worker failed."));
-      worker.postMessage({
-        html: acquisition.body,
-        url: acquisition.finalUrl.href,
-        includeReplies: scope === "page" ? false : scope === "comments" ? true : "extractors"
-      });
-    });
-    if (!result.ok)
-      throw new Error(result.message);
-    return result.value;
-  } finally {
-    if (timeout !== undefined)
-      clearTimeout(timeout);
-    worker.terminate();
-  }
-}
-function detectPlatform(url) {
-  return classifyPlatformUrl(url.href)?.platform ?? "generic";
-}
-function detectedExtractorPlatform(value, fallback) {
-  if (fallback !== "generic")
-    return fallback;
-  return value === "github" ? "github" : value === "discourse" ? "discourse" : fallback;
-}
-var trackingKeys = new Set([
-  "fbclid",
-  "gclid",
-  "dclid",
-  "msclkid",
-  "mc_cid",
-  "mc_eid",
-  "igshid",
-  "mibextid"
-]);
-var credentialQueryKey = /(?:^|[-_])(?:access[-_]?token|refresh[-_]?token|auth(?:orization)?|api[-_]?key|credential|csrf|xsrf|jwt|pass(?:word|wd)?|secret|session[-_]?id|signature|sig|code|ticket|otp|nonce|key|magic[-_]?link|one[-_]?time)(?:$|[-_])/i;
-function canonicalizeUrl(url, platform = detectPlatform(url)) {
-  const canonical = new URL(url);
-  canonical.hash = "";
-  for (const key of [...canonical.searchParams.keys()]) {
-    if (key.toLowerCase().startsWith("utm_") || trackingKeys.has(key.toLowerCase()) || credentialQueryKey.test(key)) {
-      canonical.searchParams.delete(key);
-    }
-  }
-  if (platform === "x") {
-    canonical.hostname = "x.com";
-    canonical.searchParams.delete("s");
-    canonical.searchParams.delete("t");
-  }
-  return canonical;
-}
-var MAX_SCHEMA_COMMENT_NODES = 50000;
-function schemaCommentCount(value) {
-  const seen = new Set;
-  const stack = [value];
-  let visited = 0;
-  while (stack.length > 0 && visited < MAX_SCHEMA_COMMENT_NODES) {
-    const current = stack.pop();
-    visited += 1;
-    if (typeof current !== "object" || current === null || seen.has(current))
-      continue;
-    seen.add(current);
-    if (Array.isArray(current)) {
-      const remaining2 = MAX_SCHEMA_COMMENT_NODES - visited;
-      for (let index = Math.min(current.length, remaining2) - 1;index >= 0; index -= 1) {
-        stack.push(current[index]);
-      }
-      continue;
-    }
-    if (!isRecord(current))
-      continue;
-    const own = current.commentCount;
-    if (typeof own === "number" && Number.isSafeInteger(own) && own >= 0)
-      return own;
-    if (typeof own === "string" && /^\d+$/.test(own)) {
-      const parsed = Number(own);
-      if (Number.isSafeInteger(parsed))
-        return parsed;
-    }
-    const children = [];
-    const remaining = MAX_SCHEMA_COMMENT_NODES - visited;
-    if (remaining <= 0)
-      continue;
-    for (const key in current) {
-      if (!Object.prototype.hasOwnProperty.call(current, key))
-        continue;
-      children.push(current[key]);
-      if (children.length >= remaining)
-        break;
-    }
-    for (let index = children.length - 1;index >= 0; index -= 1)
-      stack.push(children[index]);
-  }
-  return null;
-}
-function countDefuddleConversationItems(response, platform) {
-  const html = nonEmpty(response.content);
-  const extractorType = nonEmpty(response.extractorType);
-  if (html === null || extractorType === null)
-    return null;
-  const supported = new Set(["twitter", "reddit", "hackernews", "github", "discourse", "linkedin"]);
-  if (!supported.has(extractorType))
-    return null;
-  const comments = countDefuddleCommentMarkers(html);
-  if (platform !== "x" || extractorType !== "twitter")
-    return comments;
-  const separators = countDefuddleSeparators(html);
-  return comments + Math.max(0, separators - (comments > 0 ? 1 : 0));
-}
-function restoreXPostLineBreaks(content, description) {
-  if (description === null || !/[\r\n]/.test(description))
-    return content;
-  const preserved = description.replace(/\r\n?/g, `
-`).trim();
-  const flattened = preserved.replace(/\s+/g, " ");
-  const offset = content.indexOf(flattened);
-  if (offset < 0)
-    return content;
-  const literal = preserved.split(`
-`).map((line) => {
-    let escaped = line.replace(/\\/g, "\\\\").replace(/([`*_~[\]])/g, "\\$1").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    escaped = escaped.replace(/^(\s*)(#{1,6}|[-+]|\d+[.)])(?=\s)/, "$1\\$2");
-    if (/^\s*-{3,}\s*$/.test(escaped))
-      escaped = escaped.replace("-", "\\-");
-    if (/^(?: {4}|\t)/.test(escaped))
-      escaped = `&#32;${escaped.slice(1)}`;
-    return escaped;
-  }).join(`
-`);
-  return `${content.slice(0, offset)}${literal}${content.slice(offset + flattened.length)}`;
-}
-function compactCount(value, suffix) {
-  const number = Number(value.replace(/,/g, ""));
-  if (!Number.isFinite(number) || number < 0)
-    return null;
-  const multiplier = suffix?.toLowerCase() === "m" ? 1e6 : suffix?.toLowerCase() === "k" ? 1000 : 1;
-  const result = Math.floor(number * multiplier);
-  return Number.isSafeInteger(result) ? result : null;
-}
-function visibleCommentCount(content, platform) {
-  const patterns = platform === "x" ? [/\bread\s+([\d,.]+)\s*([km])?\s+repl(?:y|ies)\b/i, /\b([\d,.]+)\s*([km])?\s+repl(?:y|ies)\b/i] : [/\b(?:view|read|show)\s+(?:all\s+)?([\d,.]+)\s*([km])?\s+comments?\b/i];
-  for (const pattern of patterns) {
-    const match = pattern.exec(content);
-    if (match?.[1] === undefined)
-      continue;
-    const count = compactCount(match[1], match[2]);
-    if (count !== null)
-      return count;
-  }
-  return null;
-}
-var blockedPattern = /(?:verify (?:that )?you are (?:a )?human|(?:complete|solve) (?:the )?captcha|\bcaptcha\b|access denied|request (?:has been )?blocked|unusual traffic|cloudflare ray id)/i;
-var blockedTitlePattern = /^(?:403(?: forbidden)?|access denied|request blocked|unusual traffic|verify (?:that )?you are (?:a )?human|human verification|captcha|security (?:check|verification)|attention required|just a moment(?:\.{3})?)$/i;
-var blockedContextPattern = /(?:\b(?:please )?(?:verify|confirm) (?:that )?you are (?:a )?human\b|\b(?:complete|solve) (?:the )?captcha\b|\b(?:you (?:do not|don't) have permission|you have been blocked)\b|\b(?:your|this) (?:request|access|ip(?: address)?) (?:has been|was|is) blocked\b|\bunusual traffic from your (?:computer )?network\b|\bautomated (?:queries|requests)\b|\b(?:before proceeding|to continue),? (?:please )?(?:verify|complete|enable)\b|\bcloudflare ray id\b)/i;
-var blockedStandaloneLinePattern = /(?:^|\n)[ \t]*(?:#{1,6}[ \t]+)?(?:403(?: forbidden)?|access denied|request blocked|unusual traffic|verify (?:that )?you are (?:a )?human|captcha|security (?:check|verification))[.!]?[ \t]*(?:\r?\n|$)/i;
-var articleDiscussionPattern = /(?:\bhow to\b|\btroubleshoot(?:ing)?\b|\b(?:this|the) (?:article|guide|tutorial)\b|\b(?:this|the) (?:article|guide|tutorial) explains?\b|\blearn (?:how|why)\b)/i;
-var MAX_BLOCKED_SHELL_CODE_UNITS = 4096;
-var MAX_BLOCKED_SHELL_WORDS = 160;
-var MAX_STANDALONE_BLOCKED_SHELL_WORDS = 24;
-function looksLikeBlockedShell(content, title) {
-  if (content.length > MAX_BLOCKED_SHELL_CODE_UNITS)
-    return false;
-  const wordCount = countWords(content);
-  if (wordCount > MAX_BLOCKED_SHELL_WORDS)
-    return false;
-  const normalizedTitle = (title ?? "").slice(0, articleMetadataLimits.title).replace(/\s+/g, " ").trim();
-  const boundedVisible = `${normalizedTitle}
-${content}`;
-  if (articleDiscussionPattern.test(boundedVisible))
-    return false;
-  if (wordCount <= MAX_STANDALONE_BLOCKED_SHELL_WORDS && blockedStandaloneLinePattern.test(content))
-    return true;
-  const exactGateTitle = blockedTitlePattern.test(normalizedTitle);
-  const hasBlockSignal = exactGateTitle || blockedPattern.test(content);
-  return hasBlockSignal && (exactGateTitle || blockedContextPattern.test(content));
-}
-var authenticationGatePattern = /(?:\b(?:sign|log) in to (?:continue|read|view|see|access|comment|reply)\b|\blogin required\b|\bmembers? only\b|\bsubscriber-only\b|\bsubscribe to (?:continue|read)\b|\bthis content is private\b|\byou must be logged in\b)/i;
-var shellPattern = /(?:enable javascript|javascript is disabled|something went wrong|try reloading)/i;
-var xReplyGatePattern = /\bjoin\s+x\s+now\s+to\s+read\s+repl(?:y|ies)\b/i;
-var xCombinedAccountShellPattern = /\blog\s*in\s*sign\s*up\b/i;
-var loginShellPattern = /\blog\s*in\b/i;
-var signupShellPattern = /\bsign\s*up\b/i;
-function isRenderedConversationAccessGate(content, platform) {
-  if (authenticationGatePattern.test(content))
-    return true;
-  return platform === "x" && (xReplyGatePattern.test(content) || xCombinedAccountShellPattern.test(content) || loginShellPattern.test(content) && signupShellPattern.test(content));
-}
-function statusFor(content, title, scope, contentTruncated, renderedTextFallback) {
-  const visible = `${title ?? ""}
-${content}`;
-  if (looksLikeBlockedShell(content, title))
-    return "blocked";
-  if (authenticationGatePattern.test(visible) && content.length < 1500)
-    return "auth-required";
-  if (shellPattern.test(visible) && content.length < 500)
-    return "unsupported";
-  if (content.trim().length < 40)
-    return "unsupported";
-  if (authenticationGatePattern.test(visible))
-    return "partial";
-  if (contentTruncated || renderedTextFallback)
-    return "partial";
-  if (scope === "thread" || scope === "comments")
-    return "partial";
-  return "complete";
-}
-function qualityScore(article, status, wordCount, capturedItems, acquisition) {
-  const statusWeight = {
-    complete: 5000,
-    partial: 2000,
-    "auth-required": -2000,
-    blocked: -4000,
-    unsupported: -5000
-  };
-  const images = countMarkdownMarkers(article.content, "image", 100);
-  const links = countMarkdownMarkers(article.content, "link", 500);
-  const acquisitionAdjustment = acquisition.method.startsWith("browser") ? acquisition.contentType?.toLowerCase().includes("text/plain") === true ? -500 : 0 : 0;
-  return statusWeight[status] + Math.min(article.content.length, 50000) + Math.min(wordCount, 1e4) * 5 + Math.min(capturedItems, 1000) * 50 + images * 100 + links * 5 + acquisitionAdjustment;
-}
-function plainTextArticle(acquisition) {
-  const content = acquisition.body.trim();
-  if (content === "")
-    return null;
-  const browserTitle = boundedMetadata(acquisition.browserTitle, articleMetadataLimits.title);
-  const firstHeading = browserTitle === null ? firstMarkdownHeading(content) : null;
-  const pathname = acquisition.finalUrl.pathname;
-  let pathEnd = pathname.length;
-  while (pathEnd > 0 && pathname.charCodeAt(pathEnd - 1) === 47)
-    pathEnd -= 1;
-  const pathStart = pathname.lastIndexOf("/", pathEnd - 1) + 1;
-  const lastSegment = boundedTrimmedSlice(pathname, pathStart, pathEnd, articleMetadataLimits.title);
-  return {
-    content,
-    title: browserTitle ?? firstHeading ?? lastSegment ?? boundedMetadata(acquisition.finalUrl.hostname, articleMetadataLimits.title),
-    author: null,
-    published: null,
-    description: null
-  };
-}
-function firstMarkdownHeading(content) {
-  let lineStart = 0;
-  while (lineStart < content.length) {
-    const newline = content.indexOf(`
-`, lineStart);
-    const lineEnd = newline < 0 ? content.length : newline;
-    let cursor = lineStart;
-    let hashes = 0;
-    while (hashes < 3 && cursor < lineEnd && content.charCodeAt(cursor) === 35) {
-      hashes += 1;
-      cursor += 1;
-    }
-    if (hashes > 0 && cursor < lineEnd && (content.charCodeAt(cursor) === 32 || content.charCodeAt(cursor) === 9)) {
-      const heading = boundedTrimmedSlice(content, cursor, lineEnd, articleMetadataLimits.title);
-      if (heading !== null)
-        return heading;
-    }
-    if (newline < 0)
-      break;
-    lineStart = newline + 1;
-  }
-  return null;
-}
-async function extractPage(acquisition, scope, timeoutMs = 30000) {
-  let platform = detectPlatform(acquisition.finalUrl);
-  const contentType = acquisition.contentType?.toLowerCase() ?? "";
-  let article = null;
-  let wordCount = 0;
-  let expectedItems = null;
-  let structurallyCapturedItems = null;
-  let extractor = "plain-text";
-  const warnings = [...acquisition.warnings];
-  const renderedPage = scope === "page" && acquisition.method.startsWith("browser") ? boundedRenderedPageText(acquisition.renderedText, acquisition.renderedTextByteLimit) : null;
-  let renderedPageFallback = false;
-  let renderedPageFallbackTruncated = false;
-  if (contentType.includes("text/markdown") || contentType.includes("text/plain")) {
-    article = plainTextArticle(acquisition);
-    wordCount = article === null ? 0 : countWords(article.content);
-    if (acquisition.method.startsWith("browser")) {
-      warnings.push("Rendered readable-text fallback may include surrounding account or interface content; review it before reuse.");
-    }
-  } else {
-    try {
-      const response = await runDefuddleWorker(acquisition, scope, timeoutMs);
-      platform = detectedExtractorPlatform(response.extractorType, platform);
-      const content = nonEmpty(response.contentMarkdown) ?? nonEmpty(response.content);
-      if (content !== null) {
-        const description = boundedMetadata(response.description, articleMetadataLimits.description);
-        article = {
-          content: platform === "x" ? restoreXPostLineBreaks(content, description) : content,
-          title: boundedMetadata(response.title, articleMetadataLimits.title) ?? boundedMetadata(acquisition.browserTitle, articleMetadataLimits.title),
-          author: boundedMetadata(response.author, articleMetadataLimits.author),
-          published: boundedMetadata(response.published, articleMetadataLimits.published),
-          description
-        };
-        wordCount = typeof response.wordCount === "number" && Number.isSafeInteger(response.wordCount) && response.wordCount >= 0 ? response.wordCount : countWords(content);
-        expectedItems = schemaCommentCount(response.schemaOrgData);
-        structurallyCapturedItems = countDefuddleConversationItems(response, platform);
-        extractor = platform === "generic" ? "defuddle" : `defuddle:${platform}`;
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (renderedPage !== null) {
-        warnings.push("Article extraction failed; evaluated the bounded rendered-page text fallback from the same browser navigation.");
-      } else {
-        throw new Error(`Defuddle could not parse this acquisition: ${message}`, { cause: error });
-      }
-    }
-  }
-  if (renderedPage !== null) {
-    const primaryStatus = article === null ? "unsupported" : statusFor(article.content, article.title, scope, acquisition.contentTruncated === true, false);
-    const fallbackBase = plainTextArticle({
-      ...acquisition,
-      body: renderedPage.content,
-      contentType: "text/plain; charset=utf-8"
-    });
-    if (fallbackBase !== null) {
-      const fallbackStatus = statusFor(fallbackBase.content, fallbackBase.title, scope, renderedPage.truncated || acquisition.renderedTextTruncated === true, true);
-      if (article === null || primaryStatus === "unsupported" && fallbackStatus !== "unsupported") {
-        const primary = article;
-        article = {
-          ...fallbackBase,
-          title: primary?.title ?? fallbackBase.title,
-          author: primary?.author ?? fallbackBase.author,
-          published: primary?.published ?? fallbackBase.published,
-          description: primary?.description ?? fallbackBase.description
-        };
-        wordCount = countWords(article.content);
-        extractor = primary === null ? "rendered-page" : `${extractor}+rendered-page`;
-        renderedPageFallback = true;
-        renderedPageFallbackTruncated = renderedPage.truncated || acquisition.renderedTextTruncated === true;
-        warnings.push("Used bounded rendered-page text because article extraction produced no usable page body; it may include surrounding account or interface text and cannot prove feed completeness.");
-        if (renderedPageFallbackTruncated) {
-          warnings.push(`Rendered-page text reached the ${renderedPage.byteLimit}-byte fallback limit or the browser read boundary and was truncated.`);
-        }
-      }
-    }
-  }
-  if (article === null)
-    return null;
-  const renderedConversation = scope !== "page" && structurallyCapturedItems === null ? nonEmpty(acquisition.renderedText) : null;
-  if (renderedConversation !== null && renderedConversation !== article.content.trim()) {
-    if (isRenderedConversationAccessGate(renderedConversation, platform)) {
-      warnings.push("Skipped the separately rendered conversation context because it exposed an access gate rather than a trustworthy reply or comment tree.");
-    } else {
-      article = {
-        ...article,
-        content: `${article.content.trimEnd()}
-
-## Rendered conversation context
-
-${renderedConversation}
-`
-      };
-      wordCount = countWords(article.content);
-      extractor = `${extractor}+rendered-context`;
-      warnings.push("Preserved the separately rendered conversation context because the article extractor exposed no trustworthy item tree; it can include duplicated article, account, or interface text.");
-    }
-  }
-  expectedItems ??= visibleCommentCount(article.content, platform);
-  const capturedItems = scope === "page" ? 1 : structurallyCapturedItems ?? 0;
-  if (scope === "page") {
-    expectedItems = null;
-  } else if (structurallyCapturedItems === null) {
-    warnings.push("The rendered response exposed no trustworthy per-item structure; capturedItems is conservatively reported as 0.");
-  } else if (expectedItems !== null && capturedItems > expectedItems) {
-    warnings.push(`The source declared ${expectedItems} scoped items, but ${capturedItems} items were observed; the expected count was normalized to the observed count.`);
-    expectedItems = capturedItems;
-  }
-  const status = statusFor(article.content, article.title, scope, renderedPageFallback ? renderedPageFallbackTruncated : acquisition.contentTruncated === true, renderedPageFallback || acquisition.method.startsWith("browser") && contentType.includes("text/plain"));
-  if (status !== "complete")
-    warnings.push(`Capture status is ${status}; inspect the source before relying on completeness.`);
-  const canonicalUrl = canonicalizeUrl(acquisition.finalUrl, platform);
-  return {
-    article,
-    canonicalUrl,
-    platform,
-    status,
-    score: qualityScore(article, status, wordCount, capturedItems, acquisition),
-    wordCount,
-    expectedItems,
-    capturedItems,
-    extractor,
-    warnings,
-    acquisition
-  };
-}
-function chooseBestExtraction(candidates) {
-  const statusRank = {
-    complete: 5,
-    partial: 4,
-    "auth-required": 3,
-    blocked: 2,
-    unsupported: 1
-  };
-  let best = null;
-  for (const candidate of candidates) {
-    if (best === null || statusRank[candidate.status] > statusRank[best.status] || statusRank[candidate.status] === statusRank[best.status] && candidate.score > best.score)
-      best = candidate;
-  }
-  return best;
-}
+import { join as join2 } from "path";
 
 // src/clip/media.ts
-import { createHash as createHash2 } from "crypto";
-import { spawn } from "child_process";
+import { createHash } from "crypto";
+import { spawn, spawnSync } from "child_process";
 import {
   chmodSync,
   existsSync,
   lstatSync,
-  mkdirSync as mkdirSync2,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -916,17 +100,17 @@ import {
   rmSync,
   statSync,
   unlinkSync,
-  writeFileSync as writeFileSync2
+  writeFileSync
 } from "fs";
 import { homedir, tmpdir } from "os";
-import { basename, extname, join as join2, resolve } from "path";
+import { basename, extname, join, resolve } from "path";
 import { getCookies } from "@steipete/sweet-cookie";
 var metadataPrefix = "CLIP_MEDIA_JSON\t";
-var isRecord2 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
-function startsWith2(bytes, signature) {
+var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+function startsWith(bytes, signature) {
   return signature.every((byte, index) => bytes[index] === byte);
 }
-function ascii2(bytes, start, length) {
+function ascii(bytes, start, length) {
   let result = "";
   for (let index = start;index < start + length && index < bytes.length; index += 1) {
     result += String.fromCharCode(bytes[index] ?? 0);
@@ -935,7 +119,7 @@ function ascii2(bytes, start, length) {
 }
 function sniffMediaMimeType(bytes, extension) {
   const normalized = extension.toLowerCase();
-  if (ascii2(bytes, 4, 4) === "ftyp") {
+  if (ascii(bytes, 4, 4) === "ftyp") {
     if (normalized === ".mov")
       return "video/quicktime";
     if (normalized === ".m4a")
@@ -946,27 +130,27 @@ function sniffMediaMimeType(bytes, extension) {
       return "video/x-m4v";
     return null;
   }
-  if (startsWith2(bytes, [26, 69, 223, 163])) {
+  if (startsWith(bytes, [26, 69, 223, 163])) {
     if (normalized === ".webm")
       return "video/webm";
     if (normalized === ".mkv")
       return "video/x-matroska";
     return null;
   }
-  if (ascii2(bytes, 0, 3) === "ID3" || bytes[0] === 255 && ((bytes[1] ?? 0) & 224) === 224) {
+  if (ascii(bytes, 0, 3) === "ID3" || bytes[0] === 255 && ((bytes[1] ?? 0) & 224) === 224) {
     return normalized === ".mp3" ? "audio/mpeg" : null;
   }
-  if (ascii2(bytes, 0, 4) === "OggS") {
+  if (ascii(bytes, 0, 4) === "OggS") {
     if (normalized === ".opus")
       return "audio/opus";
     if (normalized === ".ogg")
       return "audio/ogg";
     return null;
   }
-  if (ascii2(bytes, 0, 4) === "RIFF" && ascii2(bytes, 8, 4) === "WAVE") {
+  if (ascii(bytes, 0, 4) === "RIFF" && ascii(bytes, 8, 4) === "WAVE") {
     return normalized === ".wav" ? "audio/wav" : null;
   }
-  if (ascii2(bytes, 0, 4) === "fLaC")
+  if (ascii(bytes, 0, 4) === "fLaC")
     return normalized === ".flac" ? "audio/flac" : null;
   if (bytes[0] === 255 && ((bytes[1] ?? 0) & 246) === 240) {
     return normalized === ".aac" ? "audio/aac" : null;
@@ -1002,7 +186,7 @@ function inspectMonitoredDirectory(directory, maxFiles, maxFileBytes, maxTotalBy
     return `media capture created more than ${maxFiles} files`;
   let totalBytes = 0;
   for (const entry of entries) {
-    const path = join2(directory, entry.name);
+    const path = join(directory, entry.name);
     let stats;
     try {
       stats = lstatSync(path);
@@ -1025,6 +209,7 @@ var runMediaCommand = async (specification) => {
     throw new Error("media command is empty");
   const useProcessGroup = process.platform !== "win32";
   const child = spawn(executable, specification.command.slice(1), {
+    ...specification.cwd === undefined ? {} : { cwd: specification.cwd },
     detached: useProcessGroup,
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true
@@ -1096,10 +281,56 @@ function discoverYtDlp(options = {}) {
     return fromPath;
   const homeDirectory = options.homeDirectory ?? homedir();
   return [
-    join2(homeDirectory, ".local", "bin", "yt-dlp"),
+    join(homeDirectory, ".local", "bin", "yt-dlp"),
     "/opt/homebrew/bin/yt-dlp",
     "/usr/local/bin/yt-dlp"
   ].find((path) => exists(path)) ?? null;
+}
+function readInstalledNodeVersion(executable) {
+  try {
+    const result = spawnSync(executable, ["--version"], {
+      encoding: "utf8",
+      timeout: 1000,
+      maxBuffer: 4096,
+      windowsHide: true
+    });
+    if (result.status !== 0 || typeof result.stdout !== "string")
+      return null;
+    return result.stdout.trim();
+  } catch {
+    return null;
+  }
+}
+function supportsYtDlpNodeRuntime(version) {
+  if (version === null)
+    return false;
+  const match = /^v?(\d+)(?:\.|$)/.exec(version.trim());
+  if (match?.[1] === undefined)
+    return false;
+  const major = Number(match[1]);
+  return Number.isSafeInteger(major) && major >= 22;
+}
+function discoverNodeRuntime(options = {}) {
+  const exists = options.exists ?? existsSync;
+  const which = options.which ?? ((name) => Bun.which(name));
+  const readVersion = options.readVersion ?? readInstalledNodeVersion;
+  const homeDirectory = options.homeDirectory ?? homedir();
+  const candidates = [
+    which("node"),
+    join(homeDirectory, ".local", "bin", "node"),
+    "/opt/homebrew/bin/node",
+    "/usr/local/bin/node",
+    "/usr/bin/node"
+  ];
+  const seen = new Set;
+  for (const candidate of candidates) {
+    if (candidate === null || seen.has(candidate))
+      continue;
+    seen.add(candidate);
+    if (exists(candidate) && supportsYtDlpNodeRuntime(readVersion(candidate)))
+      return candidate;
+  }
+  return null;
 }
 function cleanString(value, maximumLength) {
   if (typeof value !== "string")
@@ -1140,13 +371,15 @@ function parseMediaMetadata(stdout) {
       continue;
     try {
       const parsed = JSON.parse(line.slice(metadataPrefix.length));
-      if (!isRecord2(parsed))
+      if (!isRecord(parsed))
         continue;
       const id = cleanString(parsed.id, 512);
       const title = cleanString(parsed.title, 8192);
       const description = cleanString(parsed.description, 500000);
       const uploader = cleanString(parsed.uploader, 8192);
       const uploaderId = cleanString(parsed.uploader_id, 8192);
+      const channel = cleanString(parsed.channel, 8192);
+      const channelId = cleanString(parsed.channel_id, 8192);
       const webpageUrl = safeWebUrl(parsed.webpage_url);
       const extractor = cleanString(parsed.extractor, 1024);
       const durationSeconds = finiteNonNegative(parsed.duration);
@@ -1157,6 +390,8 @@ function parseMediaMetadata(stdout) {
         ...description === undefined ? {} : { description },
         ...uploader === undefined ? {} : { uploader },
         ...uploaderId === undefined ? {} : { uploaderId },
+        ...channel === undefined ? {} : { channel },
+        ...channelId === undefined ? {} : { channelId },
         ...webpageUrl === undefined ? {} : { webpageUrl },
         ...extractor === undefined ? {} : { extractor },
         ...durationSeconds === undefined ? {} : { durationSeconds },
@@ -1238,9 +473,9 @@ async function prepareCookieJar(request, directory, provider) {
   if (Buffer.byteLength(body, "utf8") > MAX_COOKIE_BYTES) {
     return { ok: false, warning: "Origin-scoped browser cookies exceeded the private jar size limit." };
   }
-  const path = join2(directory, "cookies.txt");
+  const path = join(directory, "cookies.txt");
   try {
-    writeFileSync2(path, body, { encoding: "utf8", flag: "wx", mode: 384 });
+    writeFileSync(path, body, { encoding: "utf8", flag: "wx", mode: 384 });
     chmodSync(path, 384);
   } catch {
     return { ok: false, warning: "Could not create the private temporary cookie jar." };
@@ -1255,10 +490,9 @@ async function prepareCookieJar(request, directory, provider) {
   return { ok: true, path, warnings };
 }
 function metadataTemplate() {
-  return `${metadataPrefix}{"id":%(id)j,"title":%(title)j,"description":%(description)j,` + `"uploader":%(uploader)j,"uploader_id":%(uploader_id)j,"webpage_url":%(webpage_url)j,` + `"extractor":%(extractor)j,"duration":%(duration)j,"timestamp":%(timestamp)j}`;
+  return `${metadataPrefix}{"id":%(id)j,"title":%(title)j,"description":%(description)j,` + `"uploader":%(uploader)j,"uploader_id":%(uploader_id)j,"webpage_url":%(webpage_url)j,` + `"channel":%(channel)j,"channel_id":%(channel_id)j,"extractor":%(extractor)j,` + `"duration":%(duration)j,"timestamp":%(timestamp)j}`;
 }
-function commandArguments(executable, runDirectory, options, cookieFile, proxyUrl) {
-  const output = join2(runDirectory, "media-%(id).80B.%(ext)s");
+function commandArguments(executable, options, cookieFile, proxyUrl) {
   const arguments_ = [
     executable,
     "--ignore-config",
@@ -1268,8 +502,6 @@ function commandArguments(executable, runDirectory, options, cookieFile, proxyUr
     "--max-filesize",
     String(options.maxFileBytes),
     "--restrict-filenames",
-    "--trim-filenames",
-    "100",
     "--no-overwrites",
     "--no-progress",
     "--newline",
@@ -1287,10 +519,61 @@ function commandArguments(executable, runDirectory, options, cookieFile, proxyUr
     "--downloader",
     "native",
     "--output",
-    output,
+    "media-%(id).80B.%(ext)s",
     "--print",
     `after_move:${metadataTemplate()}`
   ];
+  if (options.userAgent !== undefined)
+    arguments_.push("--user-agent", options.userAgent);
+  if (cookieFile !== undefined)
+    arguments_.push("--cookies", cookieFile);
+  return arguments_;
+}
+function videoContextCommandArguments(executable, options, language, cookieFile, proxyUrl, nodeRuntime) {
+  const arguments_ = [
+    executable,
+    "--ignore-config",
+    "--no-playlist",
+    "--max-downloads",
+    "1",
+    "--max-filesize",
+    String(options.maxFileBytes),
+    "--restrict-filenames",
+    "--no-overwrites",
+    "--no-progress",
+    "--newline",
+    "--no-colors",
+    "--socket-timeout",
+    String(Math.max(1, Math.ceil(options.timeoutMs / 1000))),
+    "--retries",
+    "2",
+    "--fragment-retries",
+    "2",
+    "--proxy",
+    proxyUrl,
+    "--batch-file",
+    "-",
+    "--skip-download",
+    "--no-simulate",
+    "--ignore-no-formats-error",
+    "--write-thumbnail",
+    "--write-subs",
+    "--write-auto-subs",
+    "--sub-langs",
+    language,
+    "--sub-format",
+    "vtt",
+    "--output",
+    "unused-%(id).80B.%(ext)s",
+    "--output",
+    "thumbnail:thumbnail-%(id).80B.%(ext)s",
+    "--output",
+    "subtitle:transcript-%(id).80B.%(language).16B.%(ext)s",
+    "--print",
+    metadataTemplate()
+  ];
+  if (nodeRuntime !== null)
+    arguments_.push("--js-runtimes", `node:${nodeRuntime}`);
   if (options.userAgent !== undefined)
     arguments_.push("--user-agent", options.userAgent);
   if (cookieFile !== undefined)
@@ -1330,8 +613,136 @@ function safeRunnerFailure(message) {
   ];
   return safePatterns.some((pattern) => pattern.test(message)) ? message : "yt-dlp media capture failed; page text and images can still be clipped.";
 }
-function sha2562(bytes) {
-  return createHash2("sha256").update(bytes).digest("hex");
+function positiveBound(value, fallback, maximum) {
+  return value === undefined || !Number.isSafeInteger(value) || value < 1 ? fallback : Math.min(value, maximum);
+}
+function utf8Prefix(value, maxBytes) {
+  const bytes = Buffer.from(value);
+  if (bytes.byteLength <= maxBytes)
+    return value;
+  return bytes.subarray(0, maxBytes).toString("utf8").replace(/\ufffd$/u, "");
+}
+function decodeVttEntities(value) {
+  return value.replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'").replace(/&#(?:x([0-9a-f]{1,6})|(\d{1,7}));/gi, (_match, hexadecimal, decimal) => {
+    const codePoint = Number.parseInt(hexadecimal ?? decimal ?? "", hexadecimal === undefined ? 10 : 16);
+    return Number.isSafeInteger(codePoint) && codePoint > 0 && codePoint <= 1114111 && !(codePoint >= 55296 && codePoint <= 57343) ? String.fromCodePoint(codePoint) : "";
+  });
+}
+function cleanVttCue(value) {
+  return decodeVttEntities(value.replace(/<[^>\n]{0,512}>/g, "")).replace(/\s+/g, " ").trim().slice(0, 16384);
+}
+function escapeTranscriptMarkdown(value) {
+  return value.replace(/\\/g, "\\\\").replace(/([`*_~[\]])/g, "\\$1").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function vttTimestamp(value) {
+  const timestamp = value.trim().split(/\s+/u)[0];
+  if (timestamp === undefined)
+    return null;
+  const clock = timestamp.replace(",", ".").split(".");
+  if (clock.length !== 2 || clock[1] === undefined || !/^\d{3}$/.test(clock[1]))
+    return null;
+  const pieces = clock[0]?.split(":") ?? [];
+  if (pieces.length !== 2 && pieces.length !== 3)
+    return null;
+  if (pieces.some((piece) => !/^\d{2}$/.test(piece)))
+    return null;
+  const seconds = Number(pieces.at(-1));
+  const minutes = Number(pieces.at(-2));
+  const hours = pieces.length === 3 ? Number(pieces[0]) : 0;
+  if (!Number.isSafeInteger(hours) || !Number.isSafeInteger(minutes) || !Number.isSafeInteger(seconds) || minutes > 59 || seconds > 59)
+    return null;
+  return hours * 3600 + minutes * 60 + seconds;
+}
+function formatTranscriptTimestamp(seconds) {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor(seconds % 3600 / 60);
+  const remainingSeconds = seconds % 60;
+  return hours > 0 ? `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}` : `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+}
+function rollingCaptionDelta(previous, current) {
+  if (previous === null)
+    return current;
+  if (previous === current || previous.includes(current))
+    return null;
+  const previousWords = previous.split(" ");
+  const currentWords = current.split(" ");
+  const maximumOverlap = Math.min(previousWords.length, currentWords.length, 256);
+  for (let overlap = maximumOverlap;overlap > 0; overlap -= 1) {
+    let matches = true;
+    for (let index = 0;index < overlap; index += 1) {
+      if (previousWords[previousWords.length - overlap + index] !== currentWords[index]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) {
+      const delta = currentWords.slice(overlap).join(" ").trim();
+      return delta === "" ? null : delta;
+    }
+  }
+  return current;
+}
+function parseWebVtt(input, options = {}) {
+  const maxInputBytes = positiveBound(options.maxInputBytes, 8 * 1024 * 1024, 32 * 1024 * 1024);
+  const maxCues = positiveBound(options.maxCues, 20000, 1e5);
+  const maxOutputBytes = positiveBound(options.maxOutputBytes, 8 * 1024 * 1024, 32 * 1024 * 1024);
+  const inputWasTruncated = Buffer.byteLength(input) > maxInputBytes;
+  const boundedInput = inputWasTruncated ? utf8Prefix(input, maxInputBytes) : input;
+  const lines = boundedInput.replace(/\r\n?/g, `
+`).split(`
+`);
+  const markdown = [];
+  let outputBytes = 0;
+  let previousCue = null;
+  let truncated = inputWasTruncated;
+  for (let index = 0;index < lines.length; ) {
+    const timing = lines[index] ?? "";
+    const arrow = timing.indexOf("-->");
+    if (arrow < 0) {
+      index += 1;
+      continue;
+    }
+    const seconds = vttTimestamp(timing.slice(0, arrow));
+    index += 1;
+    const cueLines = [];
+    while (index < lines.length && (lines[index] ?? "").trim() !== "") {
+      if ((lines[index] ?? "").includes("-->"))
+        break;
+      cueLines.push(lines[index] ?? "");
+      index += 1;
+    }
+    if (seconds === null)
+      continue;
+    const current = cleanVttCue(cueLines.join(" "));
+    if (current === "")
+      continue;
+    const delta = rollingCaptionDelta(previousCue, current);
+    previousCue = current;
+    if (delta === null)
+      continue;
+    if (markdown.length >= maxCues) {
+      truncated = true;
+      break;
+    }
+    const line = `- [${formatTranscriptTimestamp(seconds)}] ${escapeTranscriptMarkdown(delta)}`;
+    const lineBytes = Buffer.byteLength(line) + (markdown.length === 0 ? 0 : 1);
+    if (outputBytes + lineBytes > maxOutputBytes) {
+      truncated = true;
+      break;
+    }
+    markdown.push(line);
+    outputBytes += lineBytes;
+  }
+  return {
+    markdown: markdown.length === 0 ? "" : `${markdown.join(`
+`)}
+`,
+    cueCount: markdown.length,
+    truncated
+  };
+}
+function sha256(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
 }
 function normalizePrefix(value) {
   if (value === undefined || value === "")
@@ -1351,7 +762,7 @@ function promoteMediaFiles(runDirectory, outputDirectory, relativePrefix, maxFil
     if (!entry.isFile())
       continue;
     const extension = extname(entry.name).toLowerCase();
-    const source = join2(runDirectory, entry.name);
+    const source = join(runDirectory, entry.name);
     const stats = statSync(source);
     if (!stats.isFile() || stats.size > maxFileBytes) {
       warnings.push(`Ignored invalid or oversized yt-dlp output ${basename(entry.name)}.`);
@@ -1363,16 +774,16 @@ function promoteMediaFiles(runDirectory, outputDirectory, relativePrefix, maxFil
       warnings.push(`Ignored unrecognized or mislabeled yt-dlp output ${basename(entry.name)}.`);
       continue;
     }
-    const digest = sha2562(bytes);
+    const digest = sha256(bytes);
     const filename = `${digest}${extension}`;
-    const destination = join2(outputDirectory, filename);
+    const destination = join(outputDirectory, filename);
     if (existsSync(destination)) {
       const destinationStats = lstatSync(destination);
       if (!destinationStats.isFile() || destinationStats.isSymbolicLink()) {
         warnings.push(`Refused unsafe existing media destination ${filename}.`);
         continue;
       }
-      const destinationDigest = sha2562(readFileSync(destination));
+      const destinationDigest = sha256(readFileSync(destination));
       if (destinationDigest !== digest) {
         warnings.push(`Refused conflicting existing media destination ${filename}.`);
         continue;
@@ -1391,6 +802,92 @@ function promoteMediaFiles(runDirectory, outputDirectory, relativePrefix, maxFil
   }
   return {
     records: [...recordsByHash.values()].sort((left, right) => left.path.localeCompare(right.path)),
+    warnings
+  };
+}
+function promoteVideoContextFiles(runDirectory, outputDirectory, relativePrefix, language, maxFiles, maxFileBytes, maxTotalBytes) {
+  const violation = inspectMonitoredDirectory(runDirectory, maxFiles, maxFileBytes, maxTotalBytes);
+  if (violation !== null)
+    return { thumbnail: null, transcript: null, warnings: [violation] };
+  const warnings = [];
+  let thumbnailCandidate = null;
+  let transcriptCandidate = null;
+  const entries = readdirSync(runDirectory, { withFileTypes: true }).filter((entry) => entry.isFile()).sort((left, right) => left.name.localeCompare(right.name));
+  for (const entry of entries) {
+    const source = join(runDirectory, entry.name);
+    const stats = statSync(source);
+    if (!stats.isFile() || stats.size > maxFileBytes) {
+      warnings.push("Ignored an invalid or oversized yt-dlp sidecar.");
+      continue;
+    }
+    const extension = extname(entry.name).toLowerCase();
+    if (extension === ".vtt") {
+      const contents = readFileSync(source, "utf8");
+      unlinkSync(source);
+      const parsed = parseWebVtt(contents, {
+        maxInputBytes: Math.min(maxFileBytes, 8 * 1024 * 1024),
+        maxOutputBytes: Math.min(maxFileBytes, 8 * 1024 * 1024)
+      });
+      if (parsed.cueCount > 0 && (transcriptCandidate === null || parsed.cueCount > transcriptCandidate.cueCount)) {
+        transcriptCandidate = parsed;
+      }
+      continue;
+    }
+    const bytes = readFileSync(source);
+    const image = sniffImage(bytes);
+    if (image === null) {
+      warnings.push("Ignored an unrecognized yt-dlp sidecar.");
+      continue;
+    }
+    if (thumbnailCandidate === null || bytes.byteLength > thumbnailCandidate.bytes.byteLength) {
+      thumbnailCandidate = {
+        source,
+        bytes,
+        mimeType: image.mimeType,
+        extension: `.${image.extension}`
+      };
+    }
+  }
+  let thumbnail = null;
+  if (thumbnailCandidate !== null) {
+    const digest = sha256(thumbnailCandidate.bytes);
+    const filename = `${digest}${thumbnailCandidate.extension}`;
+    const destination = join(outputDirectory, filename);
+    let promoted = false;
+    if (existsSync(destination)) {
+      const destinationStats = lstatSync(destination);
+      if (!destinationStats.isFile() || destinationStats.isSymbolicLink()) {
+        warnings.push("Refused an unsafe existing video-thumbnail destination.");
+      } else if (sha256(readFileSync(destination)) !== digest) {
+        warnings.push("Refused a conflicting existing video-thumbnail destination.");
+      } else {
+        unlinkSync(thumbnailCandidate.source);
+        promoted = true;
+      }
+    } else {
+      renameSync(thumbnailCandidate.source, destination);
+      promoted = true;
+    }
+    if (promoted) {
+      thumbnail = {
+        path: `${relativePrefix}/${filename}`,
+        mimeType: thumbnailCandidate.mimeType,
+        bytes: thumbnailCandidate.bytes.byteLength,
+        sha256: digest
+      };
+    }
+  }
+  if (transcriptCandidate?.truncated === true) {
+    warnings.push("The video transcript reached its bounded parse limit and was truncated.");
+  }
+  return {
+    thumbnail,
+    transcript: transcriptCandidate === null ? null : {
+      language,
+      markdown: transcriptCandidate.markdown,
+      cueCount: transcriptCandidate.cueCount,
+      truncated: transcriptCandidate.truncated
+    },
     warnings
   };
 }
@@ -1444,7 +941,7 @@ async function captureMedia(options) {
   const maxOutputBytes = Math.max(4096, Math.min(options.maxOutputBytes ?? 2 * 1024 * 1024, 16 * 1024 * 1024));
   const outputDirectory = resolve(options.outputDirectory);
   try {
-    mkdirSync2(outputDirectory, { recursive: true, mode: 493 });
+    mkdirSync(outputDirectory, { recursive: true, mode: 493 });
     const outputStats = lstatSync(outputDirectory);
     if (!outputStats.isDirectory() || outputStats.isSymbolicLink()) {
       return { status: "failed", records: [], metadata: null, warnings: ["Media destination must be a real directory, not a symlink."] };
@@ -1453,7 +950,7 @@ async function captureMedia(options) {
     return { status: "failed", records: [], metadata: null, warnings: ["Could not create the media destination directory."] };
   }
   const realOutputDirectory = realpathSync(outputDirectory);
-  const runDirectory = mkdtempSync(join2(realOutputDirectory, ".clip-media-"));
+  const runDirectory = mkdtempSync(join(realOutputDirectory, ".clip-media-"));
   let authDirectory = null;
   let networkProxy = null;
   const run = options.run ?? runMediaCommand;
@@ -1480,7 +977,7 @@ async function captureMedia(options) {
       };
     }
     if (cookieRequest !== undefined) {
-      authDirectory = mkdtempSync(join2(tmpdir(), "cclrte-kb-auth-"));
+      authDirectory = mkdtempSync(join(tmpdir(), "cclrte-kb-auth-"));
       chmodSync(authDirectory, 448);
       const prepared = await prepareCookieJar(cookieRequest, authDirectory, options.cookieProvider ?? readMediaCookies);
       if (!prepared.ok) {
@@ -1495,8 +992,9 @@ async function captureMedia(options) {
       maxTransferredBytes: Math.max(64 * 1024 * 1024, Math.min(Number.MAX_SAFE_INTEGER, options.maxTotalBytes * 3))
     });
     const result = await run({
-      command: commandArguments(executable, runDirectory, options, cookieFile, networkProxy.url),
+      command: commandArguments(executable, options, cookieFile, networkProxy.url),
       stdin: privateMediaUrlInput(options.url),
+      cwd: runDirectory,
       timeoutMs: options.timeoutMs,
       maxOutputBytes,
       monitoredDirectory: runDirectory,
@@ -1505,7 +1003,7 @@ async function captureMedia(options) {
       maxTotalBytes: options.maxTotalBytes
     });
     const metadata = parseMediaMetadata(result.stdout);
-    if (result.exitCode !== 0) {
+    if (result.exitCode !== 0 && result.exitCode !== 101) {
       const classification = errorClassification(result.stderr);
       return {
         status: classification.status,
@@ -1515,6 +1013,15 @@ async function captureMedia(options) {
       };
     }
     const promoted = promoteMediaFiles(runDirectory, realOutputDirectory, normalizePrefix(options.relativePrefix), maxFiles, options.maxFileBytes, options.maxTotalBytes);
+    if (result.exitCode === 101 && promoted.records.length === 0) {
+      const classification = errorClassification(result.stderr);
+      return {
+        status: classification.status,
+        records: [],
+        metadata,
+        warnings: [...authenticationWarnings, ...promoted.warnings, classification.warning]
+      };
+    }
     if (promoted.records.length === 0) {
       return {
         status: "unsupported",
@@ -1551,9 +1058,196 @@ async function captureMedia(options) {
     }
   }
 }
+function transcriptLanguage(value) {
+  const language = (value ?? "en").trim();
+  return language.length <= 64 && /^[A-Za-z0-9]{1,16}(?:[-_][A-Za-z0-9]{1,16})*$/.test(language) ? language : null;
+}
+function nodeRuntimeFor(options, exists) {
+  if (options.nodeExecutable === null)
+    return { path: null, warnings: [] };
+  const readVersion = options.readNodeVersion ?? readInstalledNodeVersion;
+  if (options.nodeExecutable !== undefined) {
+    if (exists(options.nodeExecutable) && supportsYtDlpNodeRuntime(readVersion(options.nodeExecutable)))
+      return { path: options.nodeExecutable, warnings: [] };
+    return {
+      path: null,
+      warnings: ["The selected Node.js runtime was unavailable or older than Node.js 22; yt-dlp used its default runtime discovery."]
+    };
+  }
+  return {
+    path: discoverNodeRuntime({
+      ...options.homeDirectory === undefined ? {} : { homeDirectory: options.homeDirectory },
+      exists,
+      ...options.which === undefined ? {} : { which: options.which },
+      readVersion
+    }),
+    warnings: []
+  };
+}
+async function captureVideoContext(options) {
+  const validation = validateOptions(options);
+  if (validation !== null) {
+    return { status: "failed", thumbnail: null, transcript: null, metadata: null, warnings: [validation] };
+  }
+  const language = transcriptLanguage(options.transcriptLanguage);
+  if (language === null) {
+    return {
+      status: "failed",
+      thumbnail: null,
+      transcript: null,
+      metadata: null,
+      warnings: ["Transcript language must be one exact language identifier such as en or en-US."]
+    };
+  }
+  const exists = options.exists ?? existsSync;
+  const executable = options.executable ?? discoverYtDlp({
+    ...options.homeDirectory === undefined ? {} : { homeDirectory: options.homeDirectory },
+    exists,
+    ...options.which === undefined ? {} : { which: options.which }
+  });
+  if (executable === null || !exists(executable)) {
+    return {
+      status: "unavailable",
+      thumbnail: null,
+      transcript: null,
+      metadata: null,
+      warnings: ["yt-dlp is not installed; skipped optional video context capture."]
+    };
+  }
+  const maxFiles = Math.max(1, Math.min(options.maxFiles ?? 12, 100));
+  const maxOutputBytes = Math.max(4096, Math.min(options.maxOutputBytes ?? 2 * 1024 * 1024, 16 * 1024 * 1024));
+  const outputDirectory = resolve(options.outputDirectory);
+  try {
+    mkdirSync(outputDirectory, { recursive: true, mode: 493 });
+    const outputStats = lstatSync(outputDirectory);
+    if (!outputStats.isDirectory() || outputStats.isSymbolicLink()) {
+      return {
+        status: "failed",
+        thumbnail: null,
+        transcript: null,
+        metadata: null,
+        warnings: ["Video-context destination must be a real directory, not a symlink."]
+      };
+    }
+  } catch {
+    return {
+      status: "failed",
+      thumbnail: null,
+      transcript: null,
+      metadata: null,
+      warnings: ["Could not create the video-context destination directory."]
+    };
+  }
+  const realOutputDirectory = realpathSync(outputDirectory);
+  const runDirectory = mkdtempSync(join(realOutputDirectory, ".clip-video-context-"));
+  let authDirectory = null;
+  let networkProxy = null;
+  const run = options.run ?? runMediaCommand;
+  const authenticationWarnings = [];
+  try {
+    let cookieFile;
+    let cookieRequest;
+    if (options.cookiesFile !== undefined) {
+      cookieRequest = {
+        url: options.url,
+        source: "file",
+        file: resolve(options.cookiesFile),
+        timeoutMs: options.timeoutMs
+      };
+      if (options.cookieBrowser !== undefined) {
+        authenticationWarnings.push("The explicit cookie file took precedence over the selected browser cookie source.");
+      }
+    } else if (options.cookieBrowser !== undefined) {
+      cookieRequest = {
+        url: options.url,
+        source: options.cookieBrowser.source,
+        timeoutMs: options.timeoutMs,
+        ...options.cookieBrowser.profile === undefined ? {} : { profile: options.cookieBrowser.profile }
+      };
+    }
+    if (cookieRequest !== undefined) {
+      authDirectory = mkdtempSync(join(tmpdir(), "cclrte-kb-auth-"));
+      chmodSync(authDirectory, 448);
+      const prepared = await prepareCookieJar(cookieRequest, authDirectory, options.cookieProvider ?? readMediaCookies);
+      if (!prepared.ok) {
+        return {
+          status: "failed",
+          thumbnail: null,
+          transcript: null,
+          metadata: null,
+          warnings: [prepared.warning]
+        };
+      }
+      cookieFile = prepared.path;
+      authenticationWarnings.push(...prepared.warnings);
+    }
+    networkProxy = await (options.startProxy ?? startNetworkProxy)({
+      allowPrivateNetwork: options.allowPrivateNetwork ?? false,
+      timeoutMs: options.timeoutMs,
+      maxTransferredBytes: Math.max(64 * 1024 * 1024, Math.min(Number.MAX_SAFE_INTEGER, options.maxTotalBytes * 3))
+    });
+    const nodeRuntime = nodeRuntimeFor(options, exists);
+    const result = await run({
+      command: videoContextCommandArguments(executable, options, language, cookieFile, networkProxy.url, nodeRuntime.path),
+      stdin: privateMediaUrlInput(options.url),
+      cwd: runDirectory,
+      timeoutMs: options.timeoutMs,
+      maxOutputBytes,
+      monitoredDirectory: runDirectory,
+      maxFiles,
+      maxFileBytes: options.maxFileBytes,
+      maxTotalBytes: options.maxTotalBytes
+    });
+    const metadata = parseMediaMetadata(result.stdout);
+    const promoted = promoteVideoContextFiles(runDirectory, realOutputDirectory, normalizePrefix(options.relativePrefix), language, maxFiles, options.maxFileBytes, options.maxTotalBytes);
+    const capturedSomething = metadata !== null || promoted.thumbnail !== null || promoted.transcript !== null;
+    const warnings = [...authenticationWarnings, ...nodeRuntime.warnings, ...promoted.warnings];
+    if (result.exitCode !== 0 && !(result.exitCode === 101 && capturedSomething)) {
+      const classification = errorClassification(result.stderr);
+      return {
+        status: capturedSomething ? "partial" : classification.status,
+        thumbnail: promoted.thumbnail,
+        transcript: promoted.transcript,
+        metadata,
+        warnings: [...warnings, classification.warning]
+      };
+    }
+    if (metadata === null)
+      warnings.push("yt-dlp returned no allowlisted video metadata.");
+    if (promoted.thumbnail === null)
+      warnings.push("yt-dlp returned no supported video thumbnail.");
+    if (promoted.transcript === null) {
+      warnings.push(`yt-dlp returned no ${language} transcript for this video.`);
+    }
+    return {
+      status: metadata !== null && promoted.thumbnail !== null && promoted.transcript !== null ? "captured" : "partial",
+      thumbnail: promoted.thumbnail,
+      transcript: promoted.transcript,
+      metadata,
+      warnings
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      status: "failed",
+      thumbnail: null,
+      transcript: null,
+      metadata: null,
+      warnings: [...authenticationWarnings, safeRunnerFailure(message)]
+    };
+  } finally {
+    try {
+      await networkProxy?.close();
+    } finally {
+      if (authDirectory !== null)
+        rmSync(authDirectory, { recursive: true, force: true });
+      rmSync(runDirectory, { recursive: true, force: true });
+    }
+  }
+}
 
 // src/clip/structured.ts
-var isRecord3 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var isRecord2 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 var itemId = (value) => {
   if (typeof value === "string" && /^\d+$/.test(value))
     return value;
@@ -1562,7 +1256,7 @@ var itemId = (value) => {
   return null;
 };
 var enqueueHackerNewsChildren = (value, depth, maximumQueueSize, queue, scheduled) => {
-  if (!isRecord3(value) || !Array.isArray(value.kids))
+  if (!isRecord2(value) || !Array.isArray(value.kids))
     return { duplicate: false, truncated: false };
   let duplicate = false;
   for (const child of value.kids) {
@@ -1754,7 +1448,7 @@ async function captureHackerNews(options, classified, fetchJson) {
     throw new Error("Hacker News root item exceeded its bounded JSON allocation");
   }
   remainingBytes += rootAllocation - rootBytes;
-  if (!isRecord3(root) || itemId(root.id) === null)
+  if (!isRecord2(root) || itemId(root.id) === null)
     throw new Error("Hacker News API returned no root item");
   if (options.scope === "page") {
     const evidence2 = { root, descendants: [] };
@@ -1838,7 +1532,7 @@ async function captureBluesky(options, classified, fetchJson) {
     resolveUrl.searchParams.set("handle", did);
     const resolution = await fetchJson(resolveUrl, Math.min(options.maxHtmlBytes, 1024 * 1024));
     evidence.resolution = resolution;
-    if (!isRecord3(resolution) || typeof resolution.did !== "string" || !resolution.did.startsWith("did:")) {
+    if (!isRecord2(resolution) || typeof resolution.did !== "string" || !resolution.did.startsWith("did:")) {
       throw new Error(`Bluesky could not resolve ${classified.actor}`);
     }
     did = resolution.did;
@@ -1867,9 +1561,9 @@ function redditHasPagination(input) {
   if (!Array.isArray(input))
     return false;
   const comments = input[1];
-  if (!isRecord3(comments))
+  if (!isRecord2(comments))
     return false;
-  const data = isRecord3(comments.data) ? comments.data : null;
+  const data = isRecord2(comments.data) ? comments.data : null;
   return data !== null && data.after !== undefined && data.after !== null;
 }
 async function captureReddit(options, classified, fetchJson) {
@@ -2039,21 +1733,22 @@ function screenshotIntoBundle(screenshotPath, transaction, maxBytes) {
   const bytes = readFileSync2(screenshotPath);
   if (sniffImage(bytes)?.mimeType !== "image/png")
     return null;
-  const evidenceDirectory = join3(transaction.stagingDirectory, "evidence");
-  mkdirSync3(evidenceDirectory, { recursive: true, mode: 448 });
-  const destination = join3(evidenceDirectory, "page.png");
+  const evidenceDirectory = join2(transaction.stagingDirectory, "evidence");
+  mkdirSync2(evidenceDirectory, { recursive: true, mode: 448 });
+  const destination = join2(evidenceDirectory, "page.png");
   copyFileSync(screenshotPath, destination);
   chmodSync2(destination, 384);
   return "evidence/page.png";
 }
-var mediaManifestAssets = (result, sourceUrl) => result.records.map((record) => ({
+var mediaRecordManifestAsset = (record, sourceUrl) => ({
   source: sourceUrl,
   url: sourceUrl,
   path: record.path,
   mimeType: record.mimeType,
   bytes: record.bytes,
   sha256: record.sha256
-}));
+});
+var mediaManifestAssets = (result, sourceUrl) => result.records.map((record) => mediaRecordManifestAsset(record, sourceUrl));
 function safeMediaPath(path) {
   if (path === "" || path.startsWith("/") || /[\\\0\r\n?#]/.test(path))
     return null;
@@ -2086,6 +1781,73 @@ ${lines.join(`
 `)}
 `;
 }
+function escapedVideoMetadata(value) {
+  return value.replace(/\\/gu, "\\\\").replace(/([`*_[\]<>#])/gu, "\\$1");
+}
+function videoDuration(value) {
+  const totalSeconds = Math.max(0, Math.floor(value));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor(totalSeconds % 3600 / 60);
+  const seconds = totalSeconds % 60;
+  return hours > 0 ? `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}` : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+function appendVideoContext(content, context) {
+  const metadata = context.metadata;
+  const details = [];
+  if (metadata?.title !== undefined)
+    details.push(`- **Title:** ${escapedVideoMetadata(metadata.title)}`);
+  const channel = metadata?.channel ?? metadata?.uploader;
+  if (channel !== undefined)
+    details.push(`- **Channel:** ${escapedVideoMetadata(channel)}`);
+  if (metadata?.durationSeconds !== undefined) {
+    details.push(`- **Duration:** ${videoDuration(metadata.durationSeconds)}`);
+  }
+  if (metadata?.id !== undefined)
+    details.push(`- **Video ID:** ${escapedVideoMetadata(metadata.id)}`);
+  const thumbnailPath = context.thumbnail === null ? null : safeMediaPath(context.thumbnail.path);
+  const sections = [];
+  if (details.length > 0 || thumbnailPath !== null || metadata?.description !== undefined) {
+    const video = ["## Video"];
+    if (details.length > 0)
+      video.push("", details.join(`
+`));
+    if (thumbnailPath !== null)
+      video.push("", `![Video thumbnail](${thumbnailPath})`);
+    if (metadata?.description !== undefined && metadata.description.trim() !== "") {
+      const description = metadata.description.split(/\r?\n/gu).map(escapedVideoMetadata).join(`
+`);
+      video.push("", "### Description", "", description);
+    }
+    sections.push(video.join(`
+`));
+  }
+  if (context.transcript !== null && context.transcript.markdown.trim() !== "") {
+    sections.push(`## Transcript
+
+${context.transcript.markdown.trimEnd()}`);
+  }
+  return sections.length === 0 ? content : `${content.trimEnd()}
+
+${sections.join(`
+
+`)}
+`;
+}
+function articleWithVideoMetadata(article, metadata) {
+  if (metadata === null)
+    return article;
+  const published = metadata.timestamp === undefined ? article.published : (() => {
+    const date = new Date(metadata.timestamp * 1000);
+    return Number.isFinite(date.getTime()) ? date.toISOString() : article.published;
+  })();
+  return {
+    content: article.content,
+    title: metadata.title ?? article.title,
+    author: metadata.channel ?? metadata.uploader ?? article.author,
+    published,
+    description: metadata.description ?? article.description
+  };
+}
 function cookieMediaOptions(options) {
   const source = options.cookieSources[0] ?? (options.browserProfile === undefined ? undefined : "chrome");
   const profile = options.cookieSources.length > 0 ? options.cookieProfile : selectedBrowserCookieProfile(options);
@@ -2097,7 +1859,7 @@ function cookieMediaOptions(options) {
 function selectedBrowserCookieProfile(options) {
   if (options.browserProfile === undefined)
     return;
-  return options.browserProfileDirectory === undefined ? options.browserProfile : join3(options.browserProfile, options.browserProfileDirectory);
+  return options.browserProfileDirectory === undefined ? options.browserProfile : join2(options.browserProfile, options.browserProfileDirectory);
 }
 function assetCookieProvider(options, reader, authorizedUrl) {
   const explicit = options.cookieSources.length > 0 || options.cookiesFile !== undefined;
@@ -2147,9 +1909,10 @@ async function runCapture(rawOptions, dependencies = {}) {
     extractPage: dependencies.extractPage ?? extractPage,
     localizeAssets: dependencies.localizeAssets ?? localizeAssets,
     captureMedia: dependencies.captureMedia ?? captureMedia,
+    captureVideoContext: dependencies.captureVideoContext ?? captureVideoContext,
     now: dependencies.now ?? (() => new Date)
   };
-  const browserTemporaryDirectory = mkdtempSync2(join3(tmpdir2(), "cclrte-kb-browser-"));
+  const browserTemporaryDirectory = mkdtempSync2(join2(tmpdir2(), "cclrte-kb-browser-"));
   chmodSync2(browserTemporaryDirectory, 448);
   try {
     const preparedOptions = withBrowserProfileSnapshot(rawOptions, browserTemporaryDirectory);
@@ -2311,27 +2074,61 @@ async function runCapture(rawOptions, dependencies = {}) {
       ];
       const status = statusAfterContentRewrite(best.status, localized.truncated);
       const manifestAssets = [...localized.assets];
+      let videoContext = null;
+      let videoContextStatus = "not-requested";
+      const videoContextRequested = best.platform === "youtube" && options.media !== "none";
+      if (videoContextRequested) {
+        const usedBytes = manifestAssets.reduce((sum, asset) => sum + asset.bytes, 0);
+        const remainingBytes = options.maxTotalAssetBytes - usedBytes;
+        if (remainingBytes < 1) {
+          videoContextStatus = "partial";
+          combinedWarnings.push("Skipped YouTube thumbnail and transcript because the configured asset byte budget was exhausted.");
+        } else {
+          videoContext = await deps.captureVideoContext({
+            url: best.canonicalUrl,
+            outputDirectory: join2(transaction.assetsDirectory, "video"),
+            relativePrefix: "assets/video",
+            timeoutMs: options.timeoutMs,
+            maxFileBytes: Math.min(options.maxAssetBytes, remainingBytes),
+            maxTotalBytes: remainingBytes,
+            allowPrivateNetwork: options.allowPrivateNetwork,
+            maxFiles: Math.max(3, Math.min(options.maxItems, 12)),
+            userAgent: options.userAgent,
+            ...cookieMediaOptions(options)
+          });
+          videoContextStatus = videoContext.status === "captured" && videoContext.warnings.length > 0 ? "partial" : videoContext.status;
+          if (videoContext.thumbnail !== null) {
+            manifestAssets.push(mediaRecordManifestAsset(videoContext.thumbnail, best.canonicalUrl.href));
+          }
+          combinedWarnings.push(...videoContext.warnings);
+        }
+      }
       let mediaRecords = [];
       let mediaStatus = "not-requested";
       if (options.media === "all") {
-        const usedBytes = localized.assets.reduce((sum, asset) => sum + asset.bytes, 0);
-        const remainingBytes = Math.max(1, options.maxTotalAssetBytes - usedBytes);
-        const media = await deps.captureMedia({
-          url: best.canonicalUrl,
-          outputDirectory: join3(transaction.assetsDirectory, "media"),
-          relativePrefix: "assets/media",
-          timeoutMs: options.timeoutMs,
-          maxFileBytes: Math.min(options.maxAssetBytes, remainingBytes),
-          maxTotalBytes: remainingBytes,
-          allowPrivateNetwork: options.allowPrivateNetwork,
-          maxFiles: Math.min(options.maxItems, 100),
-          userAgent: options.userAgent,
-          ...cookieMediaOptions(options)
-        });
-        mediaStatus = media.status === "captured" && media.warnings.length > 0 ? "partial" : media.status;
-        mediaRecords = media.records;
-        manifestAssets.push(...mediaManifestAssets(media, best.canonicalUrl.href));
-        combinedWarnings.push(...media.warnings);
+        const usedBytes = manifestAssets.reduce((sum, asset) => sum + asset.bytes, 0);
+        const remainingBytes = options.maxTotalAssetBytes - usedBytes;
+        if (remainingBytes < 1) {
+          mediaStatus = "partial";
+          combinedWarnings.push("Skipped full media because the configured asset byte budget was exhausted.");
+        } else {
+          const media = await deps.captureMedia({
+            url: best.canonicalUrl,
+            outputDirectory: join2(transaction.assetsDirectory, "media"),
+            relativePrefix: "assets/media",
+            timeoutMs: options.timeoutMs,
+            maxFileBytes: Math.min(options.maxAssetBytes, remainingBytes),
+            maxTotalBytes: remainingBytes,
+            allowPrivateNetwork: options.allowPrivateNetwork,
+            maxFiles: Math.min(options.maxItems, 100),
+            userAgent: options.userAgent,
+            ...cookieMediaOptions(options)
+          });
+          mediaStatus = media.status === "captured" && media.warnings.length > 0 ? "partial" : media.status;
+          mediaRecords = media.records;
+          manifestAssets.push(...mediaManifestAssets(media, best.canonicalUrl.href));
+          combinedWarnings.push(...media.warnings);
+        }
       }
       const requestedScreenshot = options.evidence === "screenshot" || options.evidence === "all";
       const selectedScreenshot = browserScreenshots.get(best.acquisition) ?? null;
@@ -2339,11 +2136,13 @@ async function runCapture(rawOptions, dependencies = {}) {
       if (requestedScreenshot && screenshotPath === null) {
         combinedWarnings.push(browserScreenshots.size > 0 ? "A screenshot was captured for a different acquisition candidate, so it was not attached to the selected content." : "A screenshot was requested but no valid bounded PNG was captured.");
       }
-      const redactedMarkdown = redactSensitiveTextWithCount(buildClipMarkdown(best.article, {
+      const article = articleWithVideoMetadata(best.article, videoContext?.metadata ?? null);
+      const contentWithVideo = videoContext === null ? localized.content : appendVideoContext(localized.content, videoContext);
+      const redactedMarkdown = redactSensitiveTextWithCount(buildClipMarkdown(article, {
         slug,
         sourceHref: best.canonicalUrl.href,
         clipped: capturedAt.slice(0, 10),
-        content: appendCapturedMedia(localized.content, mediaRecords),
+        content: appendCapturedMedia(contentWithVideo, mediaRecords),
         platform: best.platform,
         captureStatus: status,
         captureMethod: best.acquisition.method,
@@ -2383,6 +2182,15 @@ async function runCapture(rawOptions, dependencies = {}) {
             requested: options.media === "all",
             status: mediaStatus,
             files: mediaRecords.length
+          },
+          videoContext: {
+            requested: videoContextRequested,
+            status: videoContextStatus,
+            thumbnailPath: videoContext?.thumbnail?.path ?? null,
+            transcriptLanguage: videoContext?.transcript?.language ?? null,
+            transcriptCueCount: videoContext?.transcript?.cueCount ?? 0,
+            transcriptTruncated: videoContext?.transcript?.truncated ?? false,
+            metadata: videoContext?.metadata ?? null
           }
         },
         evidence: {
@@ -2412,7 +2220,7 @@ async function runCapture(rawOptions, dependencies = {}) {
         capturedItems: best.capturedItems,
         expectedItems: best.expectedItems,
         outputDirectory,
-        markdownPath: join3(outputDirectory, `${slug}.md`),
+        markdownPath: join2(outputDirectory, `${slug}.md`),
         assetCount: manifestAssets.length,
         warnings: finalWarnings,
         attempts,

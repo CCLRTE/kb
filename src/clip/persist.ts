@@ -16,7 +16,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { sanitizeTerminalText } from "./terminal.js";
 
-export const CAPTURE_MANIFEST_SCHEMA_VERSION = 2 as const;
+export const CAPTURE_MANIFEST_SCHEMA_VERSION = 3 as const;
 export const CAPTURE_MANIFEST_FILENAME = "capture.json";
 export const CAPTURE_SOURCE_EVIDENCE_PATH = "evidence/source.html";
 
@@ -31,6 +31,20 @@ export type CaptureManifestAsset = {
 
 export type ArtifactCaptureStatus = "not-requested" | "captured" | "partial" | "unavailable" | "unsupported" | "failed";
 export type EvidenceCaptureStatus = "not-requested" | "captured" | "unavailable";
+
+export type VideoContextManifestMetadata = {
+  readonly id?: string;
+  readonly title?: string;
+  readonly description?: string;
+  readonly uploader?: string;
+  readonly uploaderId?: string;
+  readonly channel?: string;
+  readonly channelId?: string;
+  readonly webpageUrl?: string;
+  readonly extractor?: string;
+  readonly durationSeconds?: number;
+  readonly timestamp?: number;
+};
 
 export type CaptureManifestInput = {
   readonly sourceUrl: string;
@@ -67,6 +81,15 @@ export type CaptureManifestInput = {
       readonly requested: boolean;
       readonly status: ArtifactCaptureStatus;
       readonly files: number;
+    };
+    readonly videoContext: {
+      readonly requested: boolean;
+      readonly status: ArtifactCaptureStatus;
+      readonly thumbnailPath: string | null;
+      readonly transcriptLanguage: string | null;
+      readonly transcriptCueCount: number;
+      readonly transcriptTruncated: boolean;
+      readonly metadata: VideoContextManifestMetadata | null;
     };
   };
   readonly evidence: {
@@ -201,7 +224,11 @@ function ownedTargetIdentity(targetDirectory: string, slug: string): { readonly 
     || parsed === null
     || Array.isArray(parsed)
     || !("schemaVersion" in parsed)
-    || (parsed.schemaVersion !== 1 && parsed.schemaVersion !== CAPTURE_MANIFEST_SCHEMA_VERSION)
+    || (
+      parsed.schemaVersion !== 1
+      && parsed.schemaVersion !== 2
+      && parsed.schemaVersion !== CAPTURE_MANIFEST_SCHEMA_VERSION
+    )
     || !("sourceUrl" in parsed)
     || typeof parsed.sourceUrl !== "string"
   ) {
@@ -1035,6 +1062,57 @@ function requireNonNegativeInteger(value: number, label: string): number {
   return value;
 }
 
+function optionalManifestText(
+  value: string | undefined,
+  maximum: number,
+  label: string,
+): string | undefined {
+  if (value === undefined) return undefined;
+  if (maximum < 1) throw new Error(`${label} has an invalid bound`);
+  const sanitized = sanitizeTerminalText(redactSensitiveText(value)).trim();
+  if (sanitized === "") return undefined;
+  if (sanitized.length > maximum) return `${sanitized.slice(0, Math.max(0, maximum - 1))}…`;
+  return sanitized;
+}
+
+function normalizeVideoContextMetadata(
+  value: VideoContextManifestMetadata | null,
+): VideoContextManifestMetadata | null {
+  if (value === null) return null;
+  const id = optionalManifestText(value.id, 512, "video id");
+  const title = optionalManifestText(value.title, 2_048, "video title");
+  const description = optionalManifestText(value.description, 8_192, "video description");
+  const uploader = optionalManifestText(value.uploader, 1_024, "video uploader");
+  const uploaderId = optionalManifestText(value.uploaderId, 512, "video uploader id");
+  const channel = optionalManifestText(value.channel, 1_024, "video channel");
+  const channelId = optionalManifestText(value.channelId, 512, "video channel id");
+  const extractor = optionalManifestText(value.extractor, 512, "video extractor");
+  const durationSeconds = value.durationSeconds === undefined
+    ? undefined
+    : requireFiniteNumber(value.durationSeconds, "artifacts.videoContext.metadata.durationSeconds");
+  if (durationSeconds !== undefined && durationSeconds < 0) {
+    throw new Error("artifacts.videoContext.metadata.durationSeconds must not be negative");
+  }
+  const timestamp = value.timestamp === undefined
+    ? undefined
+    : requireFiniteNumber(value.timestamp, "artifacts.videoContext.metadata.timestamp");
+  return {
+    ...(id === undefined ? {} : { id }),
+    ...(title === undefined ? {} : { title }),
+    ...(description === undefined ? {} : { description }),
+    ...(uploader === undefined ? {} : { uploader }),
+    ...(uploaderId === undefined ? {} : { uploaderId }),
+    ...(channel === undefined ? {} : { channel }),
+    ...(channelId === undefined ? {} : { channelId }),
+    ...(value.webpageUrl === undefined
+      ? {}
+      : { webpageUrl: sanitizeArtifactUrl(value.webpageUrl) }),
+    ...(extractor === undefined ? {} : { extractor }),
+    ...(durationSeconds === undefined ? {} : { durationSeconds }),
+    ...(timestamp === undefined ? {} : { timestamp }),
+  };
+}
+
 function sanitizeArtifactPath(value: string, label: string): string {
   if (
     value === ""
@@ -1099,11 +1177,47 @@ function normalizeManifest(input: CaptureManifestInput, hasSourceHtml: boolean):
   if (input.artifacts.media.requested === (input.artifacts.media.status === "not-requested")) {
     throw new Error("artifacts.media requested/status fields disagree");
   }
+  if (input.artifacts.videoContext.requested === (input.artifacts.videoContext.status === "not-requested")) {
+    throw new Error("artifacts.videoContext requested/status fields disagree");
+  }
   if (!input.artifacts.images.requested && input.artifacts.images.files !== 0) {
     throw new Error("artifacts.images cannot record files when not requested");
   }
   if (!input.artifacts.media.requested && input.artifacts.media.files !== 0) {
     throw new Error("artifacts.media cannot record files when not requested");
+  }
+  if (
+    !input.artifacts.videoContext.requested
+    && (
+      input.artifacts.videoContext.thumbnailPath !== null
+      || input.artifacts.videoContext.transcriptLanguage !== null
+      || input.artifacts.videoContext.transcriptCueCount !== 0
+      || input.artifacts.videoContext.transcriptTruncated
+      || input.artifacts.videoContext.metadata !== null
+    )
+  ) {
+    throw new Error("artifacts.videoContext cannot record context when not requested");
+  }
+  const videoThumbnailPath = input.artifacts.videoContext.thumbnailPath === null
+    ? null
+    : sanitizeArtifactPath(input.artifacts.videoContext.thumbnailPath, "artifacts.videoContext.thumbnailPath");
+  if (
+    videoThumbnailPath !== null
+    && !assets.some((asset) => asset.path === videoThumbnailPath && asset.mimeType.startsWith("image/"))
+  ) {
+    throw new Error("artifacts.videoContext.thumbnailPath must reference a captured image asset");
+  }
+  const transcriptLanguage = input.artifacts.videoContext.transcriptLanguage === null
+    ? null
+    : requireManifestToken(input.artifacts.videoContext.transcriptLanguage, "artifacts.videoContext.transcriptLanguage");
+  if (
+    transcriptLanguage === null
+    && (
+      input.artifacts.videoContext.transcriptCueCount !== 0
+      || input.artifacts.videoContext.transcriptTruncated
+    )
+  ) {
+    throw new Error("artifacts.videoContext transcript fields disagree");
   }
   const screenshotRequested = input.evidence.requested === "screenshot" || input.evidence.requested === "all";
   const sourceRequested = input.evidence.requested === "source" || input.evidence.requested === "all";
@@ -1161,6 +1275,22 @@ function normalizeManifest(input: CaptureManifestInput, hasSourceHtml: boolean):
           "artifacts.media.status",
         ),
         files: requireNonNegativeInteger(input.artifacts.media.files, "artifacts.media.files"),
+      },
+      videoContext: {
+        requested: input.artifacts.videoContext.requested,
+        status: requireListedValue(
+          input.artifacts.videoContext.status,
+          ["not-requested", "captured", "partial", "unavailable", "unsupported", "failed"] as const,
+          "artifacts.videoContext.status",
+        ),
+        thumbnailPath: videoThumbnailPath,
+        transcriptLanguage,
+        transcriptCueCount: requireNonNegativeInteger(
+          input.artifacts.videoContext.transcriptCueCount,
+          "artifacts.videoContext.transcriptCueCount",
+        ),
+        transcriptTruncated: input.artifacts.videoContext.transcriptTruncated,
+        metadata: normalizeVideoContextMetadata(input.artifacts.videoContext.metadata),
       },
     },
     evidence: {

@@ -3,13 +3,6 @@ import {
   initVault
 } from "./index-455fqvmn.js";
 import {
-  navigateLinks
-} from "./index-9w6m3y9a.js";
-import {
-  metadataAtPath,
-  queryVault
-} from "./index-m4bexhht.js";
-import {
   defaultIgnoredDirectories,
   indexSemanticVault,
   markdownFiles,
@@ -33,6 +26,13 @@ import {
   searchableMarkdown,
   wikiLinks
 } from "./index-p9485vbq.js";
+import {
+  navigateLinks
+} from "./index-9w6m3y9a.js";
+import {
+  metadataAtPath,
+  queryVault
+} from "./index-m4bexhht.js";
 export {
   wikiLinks,
   semanticDatabasePath,

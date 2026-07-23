@@ -1,6 +1,6 @@
 {
   "name": "@cclrte/kb",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "A simple Markdown knowledge base for coding agents with local search, auditable capture, and derived backlinks.",
   "license": "MIT",
   "type": "module",
@@ -81,6 +81,10 @@
       "types": "./src/navigation.ts",
       "import": "./dist/navigation.js"
     },
+    "./pdf": {
+      "types": "./src/pdf.ts",
+      "import": "./dist/pdf.js"
+    },
     "./query": {
       "types": "./src/query.ts",
       "import": "./dist/query.js"
@@ -122,6 +126,17 @@
     "src/index.ts",
     "src/init.ts",
     "src/navigation.ts",
+    "src/pdf.ts",
+    "src/pdf/args.ts",
+    "src/pdf/capture.ts",
+    "src/pdf/cli.ts",
+    "src/pdf/extract.ts",
+    "src/pdf/layout.ts",
+    "src/pdf/markdown.ts",
+    "src/pdf/model.ts",
+    "src/pdf/ocr.ts",
+    "src/pdf/persist.ts",
+    "src/pdf/tools.ts",
     "src/query.ts",
     "src/semantic.ts",
     "src/vault.ts",
@@ -130,7 +145,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "bun -e 'await (await import(\"node:fs/promises\")).rm(\"./dist\", { recursive: true, force: true })' && bun build ./src/index.ts ./src/clip/browser-profiles.ts ./src/capture.ts ./src/clip/acquire.ts ./src/clip/args.ts ./src/clip/bounded-byte-buffer.ts ./src/clip/cli.ts ./src/clip/doctor.ts ./src/clip/network.ts ./src/clip/network-proxy.ts ./src/clip/persist.ts ./src/clip/terminal.ts ./src/graph.ts ./src/navigation.ts ./src/query.ts ./src/semantic.ts ./src/cli.ts ./src/clip/defuddle-worker.ts --outdir ./dist --root ./src --target bun --format esm --splitting --packages external",
+    "build": "bun -e 'await (await import(\"node:fs/promises\")).rm(\"./dist\", { recursive: true, force: true })' && bun build ./src/index.ts ./src/clip/browser-profiles.ts ./src/capture.ts ./src/clip/acquire.ts ./src/clip/args.ts ./src/clip/bounded-byte-buffer.ts ./src/clip/cli.ts ./src/clip/doctor.ts ./src/clip/network.ts ./src/clip/network-proxy.ts ./src/clip/persist.ts ./src/clip/terminal.ts ./src/graph.ts ./src/navigation.ts ./src/pdf.ts ./src/query.ts ./src/semantic.ts ./src/cli.ts ./src/clip/defuddle-worker.ts --outdir ./dist --root ./src --target bun --format esm --splitting --packages external",
     "typecheck": "tsc --noEmit",
     "test": "bun test ./src",
     "test:package": "bun run ./scripts/package-smoke.ts",

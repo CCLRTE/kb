@@ -12,7 +12,7 @@ import {
   sanitizeArtifactUrl,
   sanitizeSourceHtml,
   writeCaptureBundle
-} from "../index-7x30yhyy.js";
+} from "../index-f49xpe9k.js";
 import"../index-q32a8bfd.js";
 export {
   writeCaptureBundle,

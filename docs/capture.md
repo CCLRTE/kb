@@ -4,14 +4,18 @@
 
 ## Check local capabilities
 
-Run the diagnostics before using browser state or optional media capture:
+Run the diagnostics before using browser state, PDF ingestion, or video capture:
 
 ```sh
 kb doctor
 kb adapters
 ```
 
-`kb doctor --json` reports the installed runtime, extraction dependencies, browser support, profile display names, yt-dlp, and ffmpeg without reading cookie stores or the operating-system keychain. `kb adapters --json` returns the current platform capability matrix.
+`kb doctor --json` reports the installed runtime, extraction dependencies,
+browser support, profile display names, yt-dlp, ffmpeg, Poppler
+(`pdfinfo` and `pdftohtml`), and Tesseract. The Poppler pair is required by
+`kb pdf`; Tesseract adds local OCR for scans and screenshots.
+`kb adapters --json` returns the current platform capability matrix.
 
 ## Capture or inspect a page
 
@@ -67,7 +71,16 @@ kb clip https://example.com/article --evidence screenshot
 kb clip https://example.com/article --evidence all
 ```
 
-Image downloads are signature-checked, content-addressed, byte-bounded, and rewritten to relative bundle paths. Failed images remain inert links. `--media all` invokes yt-dlp for accessible, non-DRM audio and video; ffmpeg may be required for merging or remuxing.
+Image downloads are signature-checked, content-addressed, byte-bounded, and
+rewritten to relative bundle paths. Failed images remain inert links. Video
+posters and thumbnails exposed by the page are localized without downloading
+the full video.
+
+For YouTube, the normal capture route uses yt-dlp to retain the title,
+description, duration, channel, thumbnail, and one exact-language transcript
+when those fields are available. Full audio/video download remains opt-in:
+`--media all` invokes yt-dlp for accessible media, and ffmpeg may be required
+for merging or remuxing.
 
 Source evidence is sanitized into inert HTML with credential-shaped values redacted and a deny-all content security policy. Screenshots are viewport-only pixels and are not structurally sanitized. They may contain private content or notifications, so review them before retaining or sharing a bundle.
 
@@ -122,6 +135,11 @@ A `complete` or `partial` capture exits with status 0. Authentication, blocked, 
 - Substack uses article extraction and a signed-in browser for subscriber text when selected.
 - GitHub issues, pull requests, and discussions use the Defuddle GitHub extractor, with a signed-in browser fallback for private repositories.
 - Discourse topics use the Defuddle Discourse extractor and rendered fallback.
-- Instagram, Facebook, LinkedIn, TikTok, Threads, WhatsApp Web, YouTube, and arbitrary applications use rendered or saved-HTML capture. They do not gain a trustworthy item tree without a dedicated adapter.
+- YouTube adds bounded yt-dlp video context—title, description, duration,
+  channel, thumbnail, and an available exact-language transcript—to HTTP or
+  rendered page capture. Full audio/video remains opt-in with `--media all`.
+- Instagram, Facebook, LinkedIn, TikTok, Threads, WhatsApp Web, and arbitrary
+  applications use rendered or saved-HTML capture. They do not gain a
+  trustworthy item tree without a dedicated adapter.
 
 Platform markup and endpoints change. Run `kb adapters` for the installed version's current claims.

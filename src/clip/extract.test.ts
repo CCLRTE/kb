@@ -11,6 +11,7 @@ import {
   detectPlatform,
   defuddleWorkerUrl,
   extractPage,
+  retainDefuddleMedia,
   restoreXPostLineBreaks,
   schemaCommentCount,
   type Platform,
@@ -58,6 +59,39 @@ describe("platform and canonical URL detection", () => {
 });
 
 describe("Defuddle extraction", () => {
+  test("deduplicates separately reported main images and video posters after URL resolution", () => {
+    const content = "Post body\n\n![Existing](https://media.example/cover.jpg)\n";
+    const retained = retainDefuddleMedia(content, {
+      image: "/cover.jpg",
+      captureVideoPosters: [
+        "https://media.example/cover.jpg",
+        "/poster.jpg?width=1200",
+        "https://person:secret@media.example/rejected.jpg",
+      ],
+    }, new URL("https://media.example/post/1"));
+    expect(retained.split("https://media.example/cover.jpg")).toHaveLength(2);
+    expect(retained.split("https://media.example/poster.jpg?width=1200")).toHaveLength(2);
+    expect(retained).toContain("![Video thumbnail]");
+    expect(retained).not.toContain("secret");
+  });
+
+  test("ignores a Defuddle image candidate that resolves back to the captured page", () => {
+    const retained = retainDefuddleMedia([
+      "Video body",
+      "",
+      "![invalid page image](https://www.youtube.com/watch?v=video)",
+      "",
+      "![legitimate query image](https://www.youtube.com/watch?asset=poster)",
+      "",
+    ].join("\n"), {
+      image: "https://i.ytimg.com/vi/video/hqdefault.jpg",
+      captureVideoPosters: ["https://i.ytimg.com/vi/video/hqdefault.jpg"],
+    }, new URL("https://www.youtube.com/watch?v=video"));
+    expect(retained).not.toContain("![invalid page image]");
+    expect(retained).toContain("![legitimate query image](https://www.youtube.com/watch?asset=poster)");
+    expect(retained).toContain("https://i.ytimg.com/vi/video/hqdefault.jpg");
+  });
+
   test("restores deliberate X post line breaks from the extractor description", () => {
     const flattened = "Header\n\nagent-browser supports this natively agent-browser network har start # browse agent-browser network har stop\n\nQuote";
     const description = "agent-browser supports this natively\n\nagent-browser network har start\n# browse\nagent-browser network har stop";
@@ -226,6 +260,69 @@ describe("Defuddle extraction", () => {
     });
     expect(result?.canonicalUrl.href).toBe("https://example.com/post");
     expect(result?.article.content).toContain("sufficiently substantive article body");
+  }, 30_000);
+
+  test("retains a generic Defuddle main image and a video poster as localizable Markdown", async () => {
+    const result = await extractPage({
+      body: `<!doctype html><html><head>
+        <title>Video article</title>
+        <meta property="og:image" content="/images/cover.jpg">
+      </head><body><article>
+        <p>This article has enough substantive prose to remain the primary extracted body while media sidecars are retained.</p>
+        <video src="/media/video.mp4" poster="/images/poster.jpg"></video>
+      </article></body></html>`,
+      contentType: "text/html",
+      finalUrl: new URL("https://example.com/posts/video"),
+      method: "http",
+      warnings: [],
+    }, "page");
+    expect(result?.article.content).toContain("https://example.com/images/cover.jpg");
+    expect(result?.article.content).toContain("https://example.com/images/poster.jpg");
+    expect(result?.article.content).toContain("![Cover image]");
+    expect(result?.article.content).toContain("![Video thumbnail]");
+  }, 30_000);
+
+  test("retains both X post images and video posters", async () => {
+    const result = await extractPage({
+      body: `<!doctype html><html><head><title>X post</title></head><body>
+        <article data-testid="tweet">
+          <div data-testid="User-Name"><a>Alice</a><a>@alice</a></div>
+          <div data-testid="tweetText">A substantive X post explains why preserving both diagrams and video thumbnails matters for later retrieval.</div>
+          <div data-testid="tweetPhoto"><img alt="diagram" src="https://pbs.twimg.com/media/diagram.jpg?format=jpg&amp;name=small"></div>
+          <video src="https://video.twimg.com/tweet.mp4" poster="https://pbs.twimg.com/amplify_video_thumb/poster.jpg?format=jpg&amp;name=large"></video>
+        </article>
+      </body></html>`,
+      contentType: "text/html",
+      finalUrl: new URL("https://x.com/alice/status/123"),
+      method: "http",
+      warnings: [],
+    }, "page");
+    expect(result?.article.content).toContain("https://pbs.twimg.com/media/diagram.jpg?format=jpg&name=large");
+    expect(result?.article.content).toContain(
+      "https://pbs.twimg.com/amplify_video_thumb/poster.jpg?format=jpg&name=large",
+    );
+  }, 30_000);
+
+  test("does not duplicate the LinkedIn extractor's existing video poster", async () => {
+    const poster = "https://media.licdn.com/dms/image/poster.jpg";
+    const result = await extractPage({
+      body: `<!doctype html><html><head><title>LinkedIn post</title></head><body>
+        <article role="article" class="feed-shared-update-v2" data-urn="urn:li:activity:1">
+          <div class="update-components-actor__title">Alice Example</div>
+          <div class="update-components-text update-components-update-v2__commentary">
+            This substantive LinkedIn post preserves its media context for agent retrieval.
+          </div>
+          <div class="update-components-image"><img alt="slide" src="https://media.licdn.com/dms/image/slide.jpg"></div>
+          <div class="update-components-linkedin-video"><video src="https://media.licdn.com/video.mp4" poster="${poster}"></video></div>
+        </article>
+      </body></html>`,
+      contentType: "text/html",
+      finalUrl: new URL("https://www.linkedin.com/posts/example_activity-1"),
+      method: "http",
+      warnings: [],
+    }, "page");
+    expect(result?.article.content).toContain("https://media.licdn.com/dms/image/slide.jpg");
+    expect(result?.article.content.split(poster)).toHaveLength(2);
   }, 30_000);
 
   test("uses bounded rendered page text when an authenticated feed shell has no usable article body", async () => {

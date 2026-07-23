@@ -36,6 +36,13 @@ describe("kb argument parsing", () => {
       ok: true,
       value: { kind: "clip", arguments: ["help"] },
     });
+    expect(parseArguments(["pdf", "document.pdf", "--slug", "document"])).toEqual({
+      ok: true,
+      value: {
+        kind: "pdf",
+        arguments: ["document.pdf", "--slug", "document"],
+      },
+    });
     expect(parseArguments(["check", "--secret=do-not-print"])).toEqual({
       ok: false,
       message: "unknown check option",
@@ -286,6 +293,19 @@ describe("kb vault commands", () => {
     });
     expect(exitCode).toBe(3);
     expect(captured).toEqual([["capture", "https://example.com", "--json"]]);
+  });
+
+  test("delegates PDF arguments and preserves its exit code", async () => {
+    const captured: string[][] = [];
+    const output = captureOutput();
+    const exitCode = await main(["pdf", "document.pdf", "--json"], output.output, {
+      runPdfCommand: (arguments_) => {
+        captured.push([...(arguments_ ?? [])]);
+        return Promise.resolve(3);
+      },
+    });
+    expect(exitCode).toBe(3);
+    expect(captured).toEqual([["document.pdf", "--json"]]);
   });
 
   test("delegates local semantic indexing and search without loading QMD in other commands", async () => {

@@ -1,6 +1,11 @@
 import type { CaptureScope } from "./args.js";
 import type { AcquiredPage } from "./acquire.js";
-import { articleMetadataLimits, type Article } from "./lib.js";
+import {
+  articleMetadataLimits,
+  resolveRemote,
+  scanImageSources,
+  type Article,
+} from "./lib.js";
 import { classifyPlatformUrl, type Platform as ClassifiedPlatform } from "./platforms.js";
 
 export type CaptureStatus =
@@ -401,6 +406,92 @@ export function restoreXPostLineBreaks(content: string, description: string | nu
   return `${content.slice(0, offset)}${literal}${content.slice(offset + flattened.length)}`;
 }
 
+function normalizedDefuddleMediaUrl(value: unknown, baseUrl: URL): URL | null {
+  const candidate = nonEmpty(value);
+  if (candidate === null || candidate.length > 8_192) return null;
+  const resolved = resolveRemote(candidate, baseUrl);
+  if (resolved === null || resolved.username !== "" || resolved.password !== "") return null;
+  resolved.hash = "";
+  return resolved;
+}
+
+const defuddleInlineImage = /!\[([^\]\r\n]*)\]\((?:<([^<>\r\n]*)>|([^()\s\r\n]+))((?:\s+"[^"\r\n]*")?)\)/g;
+
+function removeDefuddleSamePageImages(
+  content: string,
+  reportedImage: unknown,
+  baseUrl: URL,
+): string {
+  const exactCandidates = new Set<string>();
+  const exactPage = new URL(baseUrl);
+  exactPage.hash = "";
+  exactCandidates.add(exactPage.href);
+  const reported = normalizedDefuddleMediaUrl(reportedImage, baseUrl);
+  if (
+    reported !== null
+    && reported.origin === baseUrl.origin
+    && reported.pathname === baseUrl.pathname
+  ) exactCandidates.add(reported.href);
+
+  return content.replace(
+    defuddleInlineImage,
+    (
+      whole,
+      _alt: string,
+      bracketed: string | undefined,
+      bare: string | undefined,
+    ) => {
+      const image = normalizedDefuddleMediaUrl(bracketed ?? bare, baseUrl);
+      return image !== null && exactCandidates.has(image.href)
+        ? ""
+        : whole;
+    },
+  );
+}
+
+/**
+ * Preserve Defuddle's separate main-image field and poster attributes that its Markdown conversion can omit.
+ * Existing Markdown/HTML images are compared after URL resolution so LinkedIn and other extractors do not duplicate them.
+ */
+export function retainDefuddleMedia(
+  content: string,
+  response: Readonly<Record<string, unknown>>,
+  baseUrl: URL,
+): string {
+  content = removeDefuddleSamePageImages(content, response.image, baseUrl);
+  const existing = new Set<string>();
+  const scan = scanImageSources(content);
+  for (const source of scan.sources) {
+    const url = normalizedDefuddleMediaUrl(source, baseUrl);
+    if (url !== null) existing.add(url.href);
+  }
+
+  const candidates: Array<{ readonly value: unknown; readonly label: string }> = [
+    { value: response.image, label: "Cover image" },
+  ];
+  if (Array.isArray(response.captureVideoPosters)) {
+    const maximum = Math.min(response.captureVideoPosters.length, 64);
+    for (let index = 0; index < maximum; index += 1) {
+      candidates.push({ value: response.captureVideoPosters[index], label: "Video thumbnail" });
+    }
+  }
+
+  const additions: string[] = [];
+  for (const candidate of candidates) {
+    const url = normalizedDefuddleMediaUrl(candidate.value, baseUrl);
+    if (
+      url === null
+      || existing.has(url.href)
+      || (url.origin === baseUrl.origin && url.pathname === baseUrl.pathname)
+    ) continue;
+    existing.add(url.href);
+    additions.push(`![${candidate.label}](<${url.href}>)`);
+  }
+  return additions.length === 0
+    ? content
+    : `${content.trimEnd()}\n\n${additions.join("\n\n")}\n`;
+}
+
 function compactCount(value: string, suffix: string | undefined): number | null {
   const number = Number(value.replace(/,/g, ""));
   if (!Number.isFinite(number) || number < 0) return null;
@@ -592,8 +683,9 @@ export async function extractPage(
       const content = nonEmpty(response.contentMarkdown) ?? nonEmpty(response.content);
       if (content !== null) {
         const description = boundedMetadata(response.description, articleMetadataLimits.description);
+        const restoredContent = platform === "x" ? restoreXPostLineBreaks(content, description) : content;
         article = {
-          content: platform === "x" ? restoreXPostLineBreaks(content, description) : content,
+          content: retainDefuddleMedia(restoredContent, response, acquisition.finalUrl),
           title: boundedMetadata(response.title, articleMetadataLimits.title)
             ?? boundedMetadata(acquisition.browserTitle, articleMetadataLimits.title),
           author: boundedMetadata(response.author, articleMetadataLimits.author),

@@ -4,6 +4,7 @@ import { relative } from "node:path";
 import { main as runClipCommand } from "./clip/cli.js";
 import { redactSensitiveText } from "./clip/persist.js";
 import { sanitizeTerminalLine, sanitizeTerminalText } from "./clip/terminal.js";
+import { main as runPdfCommand } from "./pdf/cli.js";
 import {
   lookupNote,
   type Backlink,
@@ -50,6 +51,7 @@ Usage:
   kb init [directory] [--json]
   kb clip <url|current> [capture options]
   kb inspect <url> [capture options]
+  kb pdf <file> [PDF options]
   kb refresh [--root <directory>] [--index <path>] [--json]
   kb check [--root <directory>] [--index <path>] [--json]
   kb graph [--root <directory>] [--index <path>] [--json]
@@ -61,7 +63,7 @@ Usage:
   kb doctor [--json]
   kb adapters [--json]
 
-Run \`kb clip --help\` for capture, authentication, evidence, and resource-bound options.
+Run \`kb clip --help\` for web capture options or \`kb pdf --help\` for PDF conversion options.
 `;
 
 type VaultCommand = "refresh" | "check" | "graph" | "backlinks" | "links";
@@ -69,6 +71,7 @@ type VaultCommand = "refresh" | "check" | "graph" | "backlinks" | "links";
 type ParsedCommand =
   | { readonly kind: "help" }
   | { readonly kind: "clip"; readonly arguments: readonly string[] }
+  | { readonly kind: "pdf"; readonly arguments: readonly string[] }
   | { readonly kind: "init"; readonly directory: string; readonly json: boolean }
   | {
       readonly kind: "index";
@@ -115,6 +118,7 @@ type ParseResult =
 
 type CliDependencies = {
   readonly runClipCommand?: typeof runClipCommand;
+  readonly runPdfCommand?: typeof runPdfCommand;
   readonly initVault?: typeof initVault;
   readonly scanVault?: typeof scanVault;
   readonly refreshVault?: typeof refreshVault;
@@ -446,6 +450,9 @@ export function parseArguments(arguments_: readonly string[]): ParseResult {
     const delegated = command === "inspect" ? "inspect" : "capture";
     return { ok: true, value: { kind: "clip", arguments: [delegated, ...arguments_.slice(1)] } };
   }
+  if (command === "pdf") {
+    return { ok: true, value: { kind: "pdf", arguments: arguments_.slice(1) } };
+  }
   if (command === "doctor" || command === "adapters") {
     return { ok: true, value: { kind: "clip", arguments: arguments_ } };
   }
@@ -755,6 +762,9 @@ export async function main(
   try {
     if (command.kind === "clip") {
       return await (dependencies.runClipCommand ?? runClipCommand)(command.arguments, process.env, output);
+    }
+    if (command.kind === "pdf") {
+      return await (dependencies.runPdfCommand ?? runPdfCommand)(command.arguments, process.env, output);
     }
     if (command.kind === "init") {
       return await runInit(command, output, dependencies.initVault ?? initVault);
