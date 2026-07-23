@@ -13,6 +13,10 @@ A coding agent can inspect a repository and finish a task, then begin the next s
 
 [CCLRTE/kb is an open-source knowledge base for coding agents](<https://github.com/CCLRTE/kb>). It keeps source records, maintained understanding, plans, and their relationships in ordinary Markdown under Git. Deterministic commands handle exact metadata and links; local semantic search helps when the right note uses different words. The package stays deliberately close to files so a team can change agents, editors, or search tools without migrating its memory.
 
+![Two paths compare a coding-agent session that loses decisions, evidence, and rejected approaches with maintained source records, understanding, plans, and relationships in Markdown under Git.](<https://prmte.com/article-diagrams/a-durable-knowledge-base-is-a-write-path.light.webp>)
+
+*A longer context window delays lost session context. CCLRTE/kb keeps maintained memory in ordinary Markdown under Git.*
+
 The default layout separates authored records from derived views. These directories are useful conventions, not a framework that application code must import:
 
 **Default CCLRTE/kb vault and its derived views**
