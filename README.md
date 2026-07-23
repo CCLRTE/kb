@@ -108,10 +108,10 @@ The limits are equally modular. Capture records what a selected surface exposed;
 
 [Bun](https://bun.sh/docs/installation) is the required runtime.
 
-Install the CLI from the immutable `v0.3.0` tag:
+Install the CLI from the immutable `v0.3.1` tag:
 
 ```sh
-bun add --global github:CCLRTE/kb#v0.3.0
+bun add --global github:CCLRTE/kb#v0.3.1
 kb --help
 ```
 
@@ -120,7 +120,7 @@ For programmatic use, declare the same pinned source in a project:
 ```json
 {
   "dependencies": {
-    "@cclrte/kb": "github:CCLRTE/kb#v0.3.0"
+    "@cclrte/kb": "github:CCLRTE/kb#v0.3.1"
   }
 }
 ```
