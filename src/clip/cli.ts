@@ -128,7 +128,8 @@ export async function main(
   }
 
   if (!arguments_.quiet && !arguments_.json) {
-    output.stderr(`Capturing ${safe(arguments_.url.href)} (${arguments_.mode}, ${arguments_.scope}) ...\n`);
+    const target = arguments_.currentTab ? "the current browser tab" : safe(arguments_.url?.href ?? "current");
+    output.stderr(`Capturing ${target} (${arguments_.mode}, ${arguments_.scope}) ...\n`);
   }
   try {
     if (

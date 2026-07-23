@@ -47,6 +47,12 @@ describe("platform URL classification", () => {
     ["https://web.whatsapp.com/", "whatsapp"],
     ["https://www.youtube.com/watch?v=abc123", "youtube"],
     ["https://youtu.be/abc123?t=10", "youtube"],
+    ["https://github.com/CCLRTE/kb/issues/42#issuecomment-1", "github"],
+    ["https://github.com/CCLRTE/kb/pull/43/files", "github"],
+    ["https://github.com/CCLRTE/kb/discussions/44", "github"],
+    ["https://meta.discourse.org/t/a-topic/12345/2", "discourse"],
+    ["https://discuss.example.com/t/12345", "discourse"],
+    ["https://example.com/t/a-product/12345", "generic"],
     ["https://example.com/post", "generic"],
   ] as const)("classifies %s as %s", (url, platform) => {
     expect(classifyPlatformUrl(url)?.platform).toBe(platform);
@@ -68,7 +74,21 @@ describe("platform URL classification", () => {
       platform: "threads",
       contentId: "ABC123",
     });
+    expect(classifyPlatformUrl("https://github.com/CCLRTE/kb/pull/43/files")).toMatchObject({
+      platform: "github",
+      owner: "CCLRTE",
+      repository: "kb",
+      contentKind: "pull-request",
+      contentId: "43",
+    });
+    expect(classifyPlatformUrl("https://meta.discourse.org/t/a-topic/12345/2")).toMatchObject({
+      platform: "discourse",
+      topicId: "12345",
+    });
     expect(classifyPlatformUrl("https://x.com.evil.example/alice/status/123")?.platform).toBe("generic");
+    expect(classifyPlatformUrl("https://github.com.evil.example/CCLRTE/kb/issues/42")?.platform).toBe("generic");
+    expect(classifyPlatformUrl("https://example.com/t/a-topic/12345")?.platform).toBe("generic");
+    expect(classifyPlatformUrl("https://example.com/topics/a-topic/12345")?.platform).toBe("generic");
     expect(classifyPlatformUrl("javascript:alert(1)")).toBeNull();
     expect(classifyPlatformUrl("not a url")).toBeNull();
   });

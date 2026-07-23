@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { isolatedAgentBrowserEnvironment } from "./acquire.js";
 import { BoundedByteBuffer } from "./bounded-byte-buffer.js";
 import { findKbPackageRoot } from "./package-root.js";
+import type { Platform } from "./platforms.js";
 
 export const expectedBunVersion = "1.3.14" as const;
 
@@ -510,6 +511,7 @@ export function renderDoctorReport(report: DoctorReport): string {
 export type AdapterCompleteness = "complete" | "bounded" | "best-effort" | "access-dependent" | "unsupported";
 
 export type AdapterCapability = {
+  readonly id: Platform | null;
   readonly platform: string;
   readonly preferredModes: readonly string[];
   readonly page: AdapterCompleteness;
@@ -521,6 +523,7 @@ export type AdapterCapability = {
 /** Honest capability matrix: statuses describe capture guarantees, not marketing claims. */
 export const adapterCapabilities: readonly AdapterCapability[] = [
   {
+    id: "generic",
     platform: "Generic web",
     preferredModes: ["HTTP + Defuddle", "rendered browser fallback", "saved HTML"],
     page: "best-effort",
@@ -532,6 +535,7 @@ export const adapterCapabilities: readonly AdapterCapability[] = [
     ],
   },
   {
+    id: "x",
     platform: "X",
     preferredModes: ["rendered Chrome profile/live session", "Defuddle X extractor"],
     page: "best-effort",
@@ -540,6 +544,7 @@ export const adapterCapabilities: readonly AdapterCapability[] = [
     limitations: ["Only posts and replies loaded into the rendered page are captured", "virtualized or unloaded replies remain partial", "private GraphQL clients are not invoked automatically"],
   },
   {
+    id: "substack",
     platform: "Substack",
     preferredModes: ["HTTP + Defuddle", "authorized rendered session for subscriber pages"],
     page: "access-dependent",
@@ -548,6 +553,7 @@ export const adapterCapabilities: readonly AdapterCapability[] = [
     limitations: ["Subscriber-only text is captured only when the selected session can already view it", "visible comments are retained as unstructured rendered context with conservative counts", "email/app-only or virtualized comments can be absent"],
   },
   {
+    id: "instagram",
     platform: "Instagram",
     preferredModes: ["authorized rendered session", "yt-dlp for accessible media"],
     page: "best-effort",
@@ -556,6 +562,7 @@ export const adapterCapabilities: readonly AdapterCapability[] = [
     limitations: ["Generic rendered context; no dedicated item adapter", "Login walls, virtualization, and lazy-loaded comments limit completeness", "private accounts require the user's authorized session"],
   },
   {
+    id: "linkedin",
     platform: "LinkedIn",
     preferredModes: ["authorized rendered session", "saved rendered HTML"],
     page: "best-effort",
@@ -564,14 +571,16 @@ export const adapterCapabilities: readonly AdapterCapability[] = [
     limitations: ["Generic rendered fallback; no dedicated adapter", "UI changes and collapsed comment branches can reduce completeness", "no automated private API derivation"],
   },
   {
-    platform: "Paywalled sites",
-    preferredModes: ["authorized rendered session", "origin-filtered cookie HTTP fallback"],
+    id: null,
+    platform: "Signed-in pages",
+    preferredModes: ["current browser tab", "temporary browser-profile copy", "origin-filtered cookie HTTP fallback"],
     page: "access-dependent",
     conversations: "access-dependent",
     media: "access-dependent",
-    limitations: ["Never bypasses a paywall, DRM, login, or other access control", "captures only content the supplied session is authorized to view"],
+    limitations: ["Captures what the selected session renders", "virtualized or unloaded regions can remain partial"],
   },
   {
+    id: "hacker-news",
     platform: "Hacker News",
     preferredModes: ["official Firebase API", "rendered/Defuddle fallback"],
     page: "complete",
@@ -580,6 +589,7 @@ export const adapterCapabilities: readonly AdapterCapability[] = [
     limitations: ["Comment count and depth obey CLI bounds", "deleted and dead items remain represented only as exposed by the service"],
   },
   {
+    id: "reddit",
     platform: "Reddit",
     preferredModes: ["best-effort public listing JSON", "rendered session", "Defuddle Reddit extractor"],
     page: "best-effort",
@@ -588,6 +598,7 @@ export const adapterCapabilities: readonly AdapterCapability[] = [
     limitations: ["The unofficial JSON surface can be denied or changed and falls back automatically", "collapsed/deleted branches and configured item/depth bounds remain explicit"],
   },
   {
+    id: "facebook",
     platform: "Facebook",
     preferredModes: ["authorized rendered session", "yt-dlp for accessible media"],
     page: "best-effort",
@@ -596,6 +607,7 @@ export const adapterCapabilities: readonly AdapterCapability[] = [
     limitations: ["Generic rendered context; no dedicated item adapter", "Only visible, loaded content is captured", "private audiences require the user's authorized session"],
   },
   {
+    id: "tiktok",
     platform: "TikTok",
     preferredModes: ["rendered session", "yt-dlp for accessible media"],
     page: "best-effort",
@@ -604,12 +616,58 @@ export const adapterCapabilities: readonly AdapterCapability[] = [
     limitations: ["Generic rendered context; no dedicated thread adapter", "Regional/login gates, virtualization, and lazy-loaded comments can reduce completeness", "DRM and access controls are never bypassed"],
   },
   {
+    id: "bluesky",
     platform: "Bluesky",
     preferredModes: ["public AT Protocol thread API", "rendered/Defuddle fallback"],
     page: "complete",
     conversations: "bounded",
     media: "best-effort",
     limitations: ["Thread count and depth obey CLI bounds", "moderation labels and unavailable records are preserved only as exposed"],
+  },
+  {
+    id: "threads",
+    platform: "Threads",
+    preferredModes: ["current browser tab", "rendered browser profile", "saved rendered HTML"],
+    page: "best-effort",
+    conversations: "best-effort",
+    media: "best-effort",
+    limitations: ["Only rendered posts and replies are retained", "virtualized or unloaded replies remain partial"],
+  },
+  {
+    id: "whatsapp",
+    platform: "WhatsApp Web",
+    preferredModes: ["current signed-in browser tab", "rendered browser profile"],
+    page: "access-dependent",
+    conversations: "best-effort",
+    media: "best-effort",
+    limitations: ["Only the open, rendered conversation is retained", "older virtualized messages can remain partial"],
+  },
+  {
+    id: "youtube",
+    platform: "YouTube",
+    preferredModes: ["HTTP + Defuddle", "rendered browser", "yt-dlp for accessible media"],
+    page: "best-effort",
+    conversations: "best-effort",
+    media: "best-effort",
+    limitations: ["Only loaded comments are retained", "transcripts and member-only regions depend on what the selected session renders"],
+  },
+  {
+    id: "github",
+    platform: "GitHub issues, pull requests, and discussions",
+    preferredModes: ["Defuddle GitHub extractor", "current signed-in browser tab for private repositories"],
+    page: "best-effort",
+    conversations: "best-effort",
+    media: "best-effort",
+    limitations: ["Only loaded timeline and review items are retained", "collapsed or paginated history can remain partial"],
+  },
+  {
+    id: "discourse",
+    platform: "Discourse",
+    preferredModes: ["Defuddle Discourse extractor", "rendered browser fallback"],
+    page: "best-effort",
+    conversations: "best-effort",
+    media: "best-effort",
+    limitations: ["Only loaded topic posts are retained", "long or login-gated topics can remain partial"],
   },
 ];
 
@@ -628,9 +686,8 @@ export function renderAdapterCapabilities(capabilities: readonly AdapterCapabili
   }
   lines.push(
     "",
-    "Authentication is explicit. Cookie replay is request-filtered; a selected full browser profile retains that profile's broader browser state.",
-    "The tool never bypasses paywalls, DRM, logins, or other access controls.",
-    "HAR-derived clients are an explicit advanced workflow and require separate policy/legal review; they are not generated during capture.",
+    "Use the current browser tab or a temporary copy of a signed-in browser profile for pages you already have open.",
+    "Capture is ingestion-only: it reads rendered content and does not post, like, follow, send, or submit.",
   );
   return `${lines.join("\n")}\n`;
 }

@@ -12,11 +12,50 @@
       "@cclrte/kb": [
         "./src/index.ts"
       ],
+      "@cclrte/kb/browser-profiles": [
+        "./src/clip/browser-profiles.ts"
+      ],
       "@cclrte/kb/capture": [
         "./src/capture.ts"
       ],
+      "@cclrte/kb/clip/acquire": [
+        "./src/clip/acquire.ts"
+      ],
+      "@cclrte/kb/clip/args": [
+        "./src/clip/args.ts"
+      ],
+      "@cclrte/kb/clip/bounded-byte-buffer": [
+        "./src/clip/bounded-byte-buffer.ts"
+      ],
+      "@cclrte/kb/clip/cli": [
+        "./src/clip/cli.ts"
+      ],
+      "@cclrte/kb/clip/doctor": [
+        "./src/clip/doctor.ts"
+      ],
+      "@cclrte/kb/clip/network": [
+        "./src/clip/network.ts"
+      ],
+      "@cclrte/kb/clip/network-proxy": [
+        "./src/clip/network-proxy.ts"
+      ],
+      "@cclrte/kb/clip/persist": [
+        "./src/clip/persist.ts"
+      ],
+      "@cclrte/kb/clip/terminal": [
+        "./src/clip/terminal.ts"
+      ],
       "@cclrte/kb/graph": [
         "./src/graph.ts"
+      ],
+      "@cclrte/kb/navigation": [
+        "./src/navigation.ts"
+      ],
+      "@cclrte/kb/query": [
+        "./src/query.ts"
+      ],
+      "@cclrte/kb/semantic": [
+        "./src/semantic.ts"
       ]
     },
     "verbatimModuleSyntax": true,

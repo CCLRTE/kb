@@ -1,10 +1,10 @@
 # Design
 
-CCLRTE/kb treats a knowledge base as durable Markdown plus deterministic views. A vault must remain useful when the CLI is absent, and a capture must remain inspectable when the original page changes or disappears.
+CCLRTE/kb treats a knowledge base as durable Markdown plus replaceable views. A vault must remain useful when the CLI is absent, and a capture must remain inspectable when the original page changes or disappears. Exact graph and metadata views are deterministic; semantic search is optional derived state that can be deleted and rebuilt.
 
 ## Storage is the interface
 
-The vault is an ordinary directory of Obsidian-compatible Markdown, suitable for a text editor, Git, and standard filesystem tools. Frontmatter, headings, prose, and wikilinks are owned content. There is no required database, hidden index, embedding store, model provider, or hosted account.
+The vault is an ordinary directory of Obsidian-compatible Markdown, suitable for a text editor, Git, and standard filesystem tools. Frontmatter, headings, prose, and wikilinks are owned content. Refresh, check, graph navigation, metadata queries, and capture require no hosted account or model. A local QMD index is an optional cache for semantic recall, never the authoritative copy of a note.
 
 `kb init` creates a small set of authority boundaries:
 
@@ -36,7 +36,23 @@ Fenced code, inline code, frontmatter, and HTML comments are excluded from menti
 
 `kb check` computes the expected catalog and graph policy without writing. It fails when the managed region is stale or required graph invariants do not hold. The split gives local work a deliberate mutation command and CI a read-only gate.
 
-`kb graph` exposes the scan as a human-readable or structured report. `kb backlinks` uses the same identity rules to retrieve incoming contextual links for one note. There is no second graph state to synchronize.
+`kb graph` exposes the scan as a human-readable or structured report. `kb backlinks` uses the same identity rules to retrieve incoming contextual links for one note. `kb links` traverses incoming, outgoing, or bidirectional contextual edges to a bounded depth and node count, reporting when a high-degree neighborhood reaches the cap. There is no second graph state to synchronize.
+
+## Exact metadata is authored
+
+Frontmatter is parsed as typed, nested data rather than flattened strings. Scalars retain their string, number, boolean, or null type; arrays and objects retain their structure. Tags from frontmatter are normalized for matching while the original metadata remains available in structured output.
+
+`kb list` filters that authored state by nested dotted paths, field existence, or tags, then sorts by title, path, graph counts, or nested metadata. Repeated filters are conjunctive. Missing sort values are placed last and ties are stable, so the same vault and query produce the same order.
+
+Metadata is useful for exact questions such as “which implementation plans are in progress?” It is not inferred from prose and the tool does not invent tags to improve retrieval. Authors and agents can evolve conventions in the vault's scoped `AGENTS.md` files without migrating to a package-owned schema.
+
+## Semantic recall is optional derived state
+
+`kb search` uses [QMD](https://github.com/tobi/qmd) for local retrieval. Semantic mode is the default and uses QMD 2.5.3's recommended compact EmbeddingGemma model. Keyword mode uses QMD's local full-text index without embeddings. The first semantic index or query downloads the embedding model; later runs incrementally update only changed Markdown.
+
+Each vault gets a path-derived SQLite cache under the user's cache directory unless `--database` selects another file. `index.md` and `AGENTS.md` are excluded because they are navigation and instructions rather than knowledge records. The cache may be removed at any time and recreated with `kb index`.
+
+Search results are joined back to a live vault scan, so each hit carries current typed metadata, tags, contextual link counts, and backlinks. Files outside the requested vault and stale indexed identities are discarded. A similarity score is a discovery aid, not a graph edge, a citation, or evidence that the result is true. Use `kb list` for exact metadata, `kb links` for authored relationships, and `kb search` when the same concept may be expressed in different words.
 
 ## Capture preserves an audit trail
 
@@ -45,7 +61,7 @@ Web capture is a bounded selection process rather than a promise to reproduce an
 1. A platform-specific public structured adapter when one can make a stronger completeness claim.
 2. Bounded HTTP acquisition and article extraction.
 3. Optional browser rendering for client-side or authenticated pages.
-4. Explicit saved-HTML input when the user already has an authorized representation.
+4. Explicit saved-HTML input when the user already has a saved representation.
 
 Candidates retain their attempt results. The selected representation becomes readable Markdown, while `capture.json` records the routes attempted, extractor, scope, status, counts, warnings, limits reached, asset hashes, and requested artifact outcomes. A failed lane does not erase useful output from another lane, and an uncertain fallback does not promote a conversation to `complete`.
 
@@ -79,13 +95,15 @@ URLs, redirects, DNS answers, response bodies, browser pages, cookies, subproces
 - Active source evidence is converted to inert HTML with credential-shaped values redacted.
 - Bundle paths are owned, staged beside the target, and installed by atomic rename; forced replacement requires a compatible manifest and rollback.
 
-Live or CDP browser attachment is different: an already-running browser retains its own network stack and mutates the active tab. The CLI requires a separate egress acknowledgement and leaves the external browser open. Screenshots are also different from sanitized source evidence because private content can remain visible in pixels.
+Live or CDP browser attachment keeps the browser's existing network stack and signed-in state. `kb clip current` reads the active tab without navigating or interacting with it and leaves the browser open. URL-based attached capture may navigate that tab and scroll within the configured bounds, taking bounded observations as content is rendered. Screenshots are also different from sanitized source evidence because private content can remain visible in pixels.
 
 These boundaries are not entitlement mechanisms. Capture does not bypass authentication, access controls, paywalls, CAPTCHAs, rate limits, DRM, or platform policy.
 
 ## Dependencies follow capabilities
 
-[Bun](https://bun.sh) is the required runtime. [Defuddle](https://github.com/kepano/defuddle) performs article extraction. [agent-browser](https://github.com/vercel-labs/agent-browser) provides optional rendered acquisition. CCLRTE's pinned [Sweet Cookie safety fork](https://github.com/CCLRTE/sweet-cookie) supports explicit browser-cookie import while retaining host-only scope and rejecting partitioned or container-scoped state that the capture lanes cannot replay faithfully.
+[Bun](https://bun.sh) is the required runtime. [YAML](https://eemeli.org/yaml/) parses typed frontmatter, and [QMD](https://github.com/tobi/qmd) supplies the optional local keyword and embedding index. QMD is loaded only by index and search commands, so deterministic graph and metadata commands do not initialize its native runtime or model.
+
+[Defuddle](https://github.com/kepano/defuddle) performs article extraction. [agent-browser](https://github.com/vercel-labs/agent-browser) provides optional rendered acquisition. CCLRTE's pinned [Sweet Cookie safety fork](https://github.com/CCLRTE/sweet-cookie) supports explicit browser-cookie import while retaining host-only scope and rejecting partitioned or container-scoped state that the capture lanes cannot replay faithfully.
 
 [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [FFmpeg](https://ffmpeg.org) remain optional because only full audio or video localization needs them. `kb doctor` reports what is installed without probing cookie stores, and `kb adapters` reports the installed platform claims. A missing optional capability narrows the available route; it does not change the storage or graph model.
 

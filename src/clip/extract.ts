@@ -1,7 +1,7 @@
 import type { CaptureScope } from "./args.js";
 import type { AcquiredPage } from "./acquire.js";
 import { articleMetadataLimits, type Article } from "./lib.js";
-import { classifyPlatformUrl } from "./platforms.js";
+import { classifyPlatformUrl, type Platform as ClassifiedPlatform } from "./platforms.js";
 
 export type CaptureStatus =
   | "complete"
@@ -10,20 +10,7 @@ export type CaptureStatus =
   | "blocked"
   | "unsupported";
 
-export type Platform =
-  | "x"
-  | "substack"
-  | "instagram"
-  | "linkedin"
-  | "hacker-news"
-  | "reddit"
-  | "facebook"
-  | "tiktok"
-  | "threads"
-  | "whatsapp"
-  | "youtube"
-  | "bluesky"
-  | "generic";
+export type Platform = ClassifiedPlatform;
 
 export type ExtractedPage = {
   readonly article: Article;
@@ -300,6 +287,11 @@ export function detectPlatform(url: URL): Platform {
   return classifyPlatformUrl(url.href)?.platform ?? "generic";
 }
 
+function detectedExtractorPlatform(value: unknown, fallback: Platform): Platform {
+  if (fallback !== "generic") return fallback;
+  return value === "github" ? "github" : value === "discourse" ? "discourse" : fallback;
+}
+
 const trackingKeys = new Set([
   "fbclid",
   "gclid",
@@ -573,7 +565,7 @@ export async function extractPage(
   scope: CaptureScope,
   timeoutMs = 30_000,
 ): Promise<ExtractedPage | null> {
-  const platform = detectPlatform(acquisition.finalUrl);
+  let platform = detectPlatform(acquisition.finalUrl);
   const contentType = acquisition.contentType?.toLowerCase() ?? "";
   let article: Article | null = null;
   let wordCount = 0;
@@ -596,6 +588,7 @@ export async function extractPage(
   } else {
     try {
       const response = await runDefuddleWorker(acquisition, scope, timeoutMs);
+      platform = detectedExtractorPlatform(response.extractorType, platform);
       const content = nonEmpty(response.contentMarkdown) ?? nonEmpty(response.content);
       if (content !== null) {
         const description = boundedMetadata(response.description, articleMetadataLimits.description);

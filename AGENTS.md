@@ -1,9 +1,11 @@
 # Contents
 
-- `src/` – deterministic vault graph, initialization, CLI, capture, and diagnostic code with colocated tests.
+- `src/` – deterministic vault graph, typed metadata queries, structural navigation, optional local semantic search, initialization, CLI, capture, and diagnostic code with colocated tests.
 - `dist/` – committed Bun-targeted ESM entrypoints and the compiled Defuddle worker.
 - `skills/clip-article/` – reusable agent workflow for bounded, auditable source capture.
 - `skills/refresh-kb/` – reusable agent workflow for refreshing the catalog and reviewing graph findings.
+- `skills/query-kb/` – reusable agent workflow for choosing exact metadata, graph, keyword, or semantic retrieval.
+- `skills/write-plan/` – reusable agent workflow for creating and growing durable implementation plans.
 - `docs/` – design, capture, and agent-workflow documentation.
 - `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, and `LICENSE` – public usage, project policy, threat model, and terms.
 - `package.json`, `tsconfig.json`, and `bun.lock` – standalone package and frozen verification configuration.
@@ -12,7 +14,8 @@
 
 - Use Bun 1.3.14 for repository commands and keep the authored Markdown compatible with Obsidian and ordinary text tooling.
 - Treat this repository as the complete project. Files and Git prose may use only its public names, paths, commands, and examples; do not refer to or infer a non-public source repository.
-- Keep graph maintenance deterministic and local-first. Do not require a database, hosted service, model, API key, or hidden index for refresh, check, graph, or backlink commands.
+- Keep graph maintenance and exact metadata queries deterministic and local-first. Do not require a database, hosted service, model, API key, or hidden index for refresh, check, list, graph, link, or backlink commands.
+- Keep QMD semantic state optional, local, dynamically loaded, and rebuildable from Markdown. Treat matches as discovery aids and join them to current authored metadata and graph state.
 - Derive backlinks from explicit wikilinks. Keep the managed catalog navigational, never inject reciprocal links, and leave title or alias mentions advisory.
 - Restrict generated edits to marked, tool-owned regions; preserve concurrent authored changes when refreshing; and fail closed on malformed markers or unsafe paths.
 - Treat capture inputs and outputs as hostile. Keep network, browser, subprocess, byte, item, depth, path, credential, and terminal boundaries bounded and covered by named regressions.

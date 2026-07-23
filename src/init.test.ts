@@ -25,7 +25,13 @@ describe("vault initialization", () => {
     expect(scanned.index).toBe("current");
     expect(scanned.analysis.noteCount).toBe(0);
     expect(scanned.analysis.issues).toEqual([]);
-    expect(readFileSync(join(root, "AGENTS.md"), "utf8")).toContain("# Guidelines");
+    const rootGuide = readFileSync(join(root, "AGENTS.md"), "utf8");
+    const planGuide = readFileSync(join(root, "plans/AGENTS.md"), "utf8");
+    expect(rootGuide).toContain("# Guidelines");
+    expect(rootGuide).toContain("kb search");
+    expect(planGuide).toContain("type: plan");
+    expect(planGuide).toContain("verification");
+    expect(planGuide).toContain("same file");
   });
 
   test("refuses to merge into an existing directory", async () => {

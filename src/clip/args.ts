@@ -15,7 +15,9 @@ export type CookieSource = (typeof cookieSources)[number];
 
 export type CaptureArguments = {
   readonly command: "capture" | "inspect";
-  readonly url: URL;
+  /** Null only for the `current` target before its attached tab has been read. */
+  readonly url: URL | null;
+  readonly currentTab: boolean;
   readonly slug: string | undefined;
   readonly mode: CaptureMode;
   readonly scope: CaptureScope;
@@ -34,7 +36,6 @@ export type CaptureArguments = {
   readonly browserProfileDirectory?: "Default";
   readonly browserLive: boolean;
   readonly cdp: string | undefined;
-  readonly trustAttachedBrowserEgress: boolean;
   readonly cookieSources: readonly CookieSource[];
   readonly cookieProfile: string | undefined;
   readonly cookiesFile: string | undefined;
@@ -57,6 +58,12 @@ export type CliArguments =
 export type ParseArgumentsResult =
   | { readonly ok: true; readonly value: CliArguments }
   | { readonly ok: false; readonly message: string };
+
+/** Require a URL after a `current` target has been resolved from its attached tab. */
+export function captureUrl(options: Pick<CaptureArguments, "url">): URL {
+  if (options.url === null) throw new Error("the current browser target has not resolved its URL yet");
+  return options.url;
+}
 
 const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
@@ -190,7 +197,6 @@ export function parseArguments(
   let browserProfile: string | undefined;
   let browserLive = false;
   let cdp: string | undefined;
-  let trustAttachedBrowserEgress = false;
   const selectedCookieSources: CookieSource[] = [];
   let cookieProfile: string | undefined;
   let cookiesFile: string | undefined;
@@ -219,7 +225,6 @@ export function parseArguments(
     else if (argument === "--json") json = true;
     else if (argument === "--quiet") quiet = true;
     else if (argument === "--browser-live") browserLive = true;
-    else if (argument === "--trust-attached-browser-egress") trustAttachedBrowserEgress = true;
     else if (argument === "--allow-private-network") allowPrivateNetwork = true;
     else {
       if (!valueOptions.has(argument)) return { ok: false, message: `unknown option: ${argument}` };
@@ -289,9 +294,10 @@ export function parseArguments(
     }
   }
 
-  if (positional.length === 0) return { ok: false, message: `${command} requires a URL` };
-  if (positional.length > 2) return { ok: false, message: `${command} accepts one URL and one optional slug` };
-  const parsedUrl = parseUrl(positional[0] ?? "");
+  if (positional.length === 0) return { ok: false, message: `${command} requires a URL or current` };
+  if (positional.length > 2) return { ok: false, message: `${command} accepts one URL/current target and one optional slug` };
+  const currentTab = positional[0] === "current";
+  const parsedUrl = currentTab ? null : parseUrl(positional[0] ?? "");
   if (typeof parsedUrl === "string") return { ok: false, message: parsedUrl };
   if (mode === "file" && htmlFile === undefined) return { ok: false, message: "--mode file requires --html <path|->" };
   if (htmlFile !== undefined && mode !== "auto" && mode !== "file") {
@@ -303,15 +309,15 @@ export function parseArguments(
   if (cdp !== undefined && (browserLive || browserProfile !== undefined)) {
     return { ok: false, message: "--cdp cannot be combined with --browser-live or --browser-profile" };
   }
+  if (currentTab && browserProfile !== undefined) {
+    return { ok: false, message: "the current target attaches with --browser-live or --cdp; it cannot use --browser-profile" };
+  }
+  if (currentTab && !browserLive && cdp === undefined) {
+    return { ok: false, message: "the current target requires --browser-live or --cdp <loopback-port>" };
+  }
   const hasBrowserSelection = browserLive || cdp !== undefined || browserProfile !== undefined;
   if (hasBrowserSelection && (mode === "http" || mode === "file" || htmlFile !== undefined)) {
     return { ok: false, message: "browser selection requires --mode auto or --mode browser and cannot be combined with --html" };
-  }
-  if ((browserLive || cdp !== undefined) && !trustAttachedBrowserEgress) {
-    return {
-      ok: false,
-      message: "--browser-live and --cdp require --trust-attached-browser-egress to acknowledge the attached browser's unfiltered network access",
-    };
   }
   if ((evidence === "screenshot" || evidence === "all") && (mode === "http" || mode === "file" || htmlFile !== undefined)) {
     return { ok: false, message: "screenshot evidence requires --mode auto or --mode browser" };
@@ -348,8 +354,9 @@ export function parseArguments(
     value: {
       command,
       url: parsedUrl,
+      currentTab,
       slug: positional[1],
-      mode: htmlFile === undefined ? mode : "file",
+      mode: htmlFile === undefined ? (currentTab ? "browser" : mode) : "file",
       scope,
       media: stdout ? "none" : media,
       evidence: stdout ? "none" : evidence,
@@ -362,7 +369,6 @@ export function parseArguments(
       browserProfile,
       browserLive,
       cdp,
-      trustAttachedBrowserEgress,
       cookieSources: selectedCookieSources,
       cookieProfile,
       cookiesFile,
@@ -380,6 +386,8 @@ export function parseArguments(
 
 export const usage = `Usage:
   kb clip <url> [slug] [options]
+  kb clip current [slug] --browser-live [options]
+  kb clip current [slug] --cdp <loopback-port> [options]
   kb clip capture <url> [slug] [options]
   kb clip inspect <url> [options]
   kb doctor [--json]
@@ -390,9 +398,8 @@ Capture options:
   --scope auto|page|thread|comments Content scope (default: platform-aware)
   --html <path|->                  Parse saved/rendered HTML; - reads stdin
   --browser-profile <name|path>    Use a signed-in or persistent Chrome profile
-  --browser-live                   Attach to and navigate user-approved live Chrome
+  --browser-live                   Attach to a live Chrome session
   --cdp <loopback-port>            Attach to a local CDP-capable browser
-  --trust-attached-browser-egress  Acknowledge that live/CDP traffic cannot be filtered
   --cookie-source <browser>        chrome|arc|brave|chromium|edge|firefox|safari
   --cookie-profile <name|path>     Browser profile; Safari expects a Cookies.binarycookies path
   --cookies-file <path>            Cookie-Editor JSON/base64, Netscape, Cookie header, or cURL input

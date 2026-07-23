@@ -4,8 +4,29 @@ import { relative } from "node:path";
 import { main as runClipCommand } from "./clip/cli.js";
 import { redactSensitiveText } from "./clip/persist.js";
 import { sanitizeTerminalLine, sanitizeTerminalText } from "./clip/terminal.js";
-import { lookupNote, type Backlink, type LinkIssue, type VaultAnalysis } from "./graph.js";
+import {
+  lookupNote,
+  type Backlink,
+  type LinkIssue,
+  type MetadataScalar,
+  type VaultAnalysis,
+} from "./graph.js";
 import { initVault, type InitVaultResult } from "./init.js";
+import { navigateLinks, type LinkDirection, type LinkNeighborhood } from "./navigation.js";
+import {
+  queryVault,
+  type MetadataFilter,
+  type QueryDirection,
+  type QueryRow,
+  type QuerySort,
+} from "./query.js";
+import {
+  indexSemanticVault,
+  searchSemanticVault,
+  type SemanticIndexResult,
+  type SemanticSearchMode,
+  type SemanticSearchResult,
+} from "./semantic.js";
 import {
   refreshVault,
   scanVault,
@@ -27,30 +48,65 @@ export const usage = `kb — auditable capture and derived links for Markdown va
 
 Usage:
   kb init [directory] [--json]
-  kb clip <url> [capture options]
+  kb clip <url|current> [capture options]
   kb inspect <url> [capture options]
   kb refresh [--root <directory>] [--index <path>] [--json]
   kb check [--root <directory>] [--index <path>] [--json]
   kb graph [--root <directory>] [--index <path>] [--json]
   kb backlinks <note> [--root <directory>] [--index <path>] [--json]
+  kb links <note> [--root <directory>] [--direction <in|out|both>] [--depth <count>] [--limit <count>] [--json]
+  kb list [--root <directory>] [--where <path=value>] [--has <path>] [--tag <tag>] [--sort <field>] [--order <asc|desc>] [--limit <count>] [--json]
+  kb index [--root <directory>] [--database <path>] [--force] [--json]
+  kb search <query> [--root <directory>] [--database <path>] [--mode <semantic|keyword>] [--limit <count>] [--min-score <score>] [--json]
   kb doctor [--json]
   kb adapters [--json]
 
 Run \`kb clip --help\` for capture, authentication, evidence, and resource-bound options.
 `;
 
-type VaultCommand = "refresh" | "check" | "graph" | "backlinks";
+type VaultCommand = "refresh" | "check" | "graph" | "backlinks" | "links";
 
 type ParsedCommand =
   | { readonly kind: "help" }
   | { readonly kind: "clip"; readonly arguments: readonly string[] }
   | { readonly kind: "init"; readonly directory: string; readonly json: boolean }
   | {
+      readonly kind: "index";
+      readonly root: string;
+      readonly database?: string;
+      readonly force: boolean;
+      readonly json: boolean;
+    }
+  | {
+      readonly kind: "search";
+      readonly root: string;
+      readonly database?: string;
+      readonly mode: SemanticSearchMode;
+      readonly limit?: number;
+      readonly minScore?: number;
+      readonly query: string;
+      readonly json: boolean;
+    }
+  | {
+      readonly kind: "list";
+      readonly root: string;
+      readonly options: ScanVaultOptions;
+      readonly filters: readonly MetadataFilter[];
+      readonly tags: readonly string[];
+      readonly sort: QuerySort;
+      readonly direction: QueryDirection;
+      readonly limit?: number;
+      readonly json: boolean;
+    }
+  | {
       readonly kind: VaultCommand;
       readonly root: string;
       readonly options: ScanVaultOptions;
       readonly json: boolean;
       readonly note?: string;
+      readonly direction?: LinkDirection;
+      readonly depth?: number;
+      readonly limit?: number;
     };
 
 type ParseResult =
@@ -62,6 +118,8 @@ type CliDependencies = {
   readonly initVault?: typeof initVault;
   readonly scanVault?: typeof scanVault;
   readonly refreshVault?: typeof refreshVault;
+  readonly indexSemanticVault?: typeof indexSemanticVault;
+  readonly searchSemanticVault?: typeof searchSemanticVault;
 };
 
 function safe(value: string): string {
@@ -87,6 +145,9 @@ function parseVaultCommand(command: VaultCommand, arguments_: readonly string[])
   let root = ".";
   let index: string | undefined;
   let json = false;
+  let direction: LinkDirection = "both";
+  let depth = 1;
+  let limit: number | undefined;
   const positional: string[] = [];
 
   for (let cursor = 0; cursor < arguments_.length; cursor += 1) {
@@ -104,14 +165,38 @@ function parseVaultCommand(command: VaultCommand, arguments_: readonly string[])
       cursor += 1;
       continue;
     }
+    if (command === "links" && (argument === "--direction" || argument === "--depth" || argument === "--limit")) {
+      const value = readValue(arguments_, cursor);
+      if (value === null) return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--direction") {
+        if (value !== "in" && value !== "out" && value !== "both") {
+          return { ok: false, message: "--direction must be in, out, or both" };
+        }
+        direction = value;
+      } else if (argument === "--depth") {
+        const parsed = Number(value);
+        if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 10) {
+          return { ok: false, message: "--depth must be an integer from 1 through 10" };
+        }
+        depth = parsed;
+      } else {
+        const parsed = Number(value);
+        if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 1_000) {
+          return { ok: false, message: "--limit must be an integer from 1 through 1000" };
+        }
+        limit = parsed;
+      }
+      cursor += 1;
+      continue;
+    }
     if (argument.startsWith("--")) return { ok: false, message: `unknown ${command} option` };
     positional.push(argument);
   }
 
-  if (command === "backlinks") {
+  if (command === "backlinks" || command === "links") {
     const note = positional[0];
     if (positional.length !== 1 || note === undefined) {
-      return { ok: false, message: "backlinks requires exactly one note path, title, or alias" };
+      return { ok: false, message: `${command} requires exactly one note path, title, or alias` };
     }
     return {
       ok: true,
@@ -121,6 +206,9 @@ function parseVaultCommand(command: VaultCommand, arguments_: readonly string[])
         options: index === undefined ? {} : { index },
         json,
         note,
+        ...(command === "links"
+          ? { direction, depth, ...(limit === undefined ? {} : { limit }) }
+          : {}),
       },
     };
   }
@@ -131,6 +219,216 @@ function parseVaultCommand(command: VaultCommand, arguments_: readonly string[])
       kind: command,
       root,
       options: index === undefined ? {} : { index },
+      json,
+    },
+  };
+}
+
+type MetadataScalarParse =
+  | { readonly ok: true; readonly value: MetadataScalar }
+  | { readonly ok: false; readonly message: string };
+
+function metadataScalar(raw: string): MetadataScalarParse {
+  const value = raw.trim();
+  if (value.startsWith('"') || value.endsWith('"')) {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return typeof parsed === "string"
+        ? { ok: true, value: parsed }
+        : { ok: false, message: "quoted --where values must be strings" };
+    } catch {
+      return { ok: false, message: "double-quoted --where values must be valid JSON strings" };
+    }
+  }
+  if (value.startsWith("'") || value.endsWith("'")) {
+    if (!(value.startsWith("'") && value.endsWith("'") && value.length >= 2)) {
+      return { ok: false, message: "single-quoted --where values must have a closing quote" };
+    }
+    return { ok: true, value: value.slice(1, -1).replaceAll("''", "'") };
+  }
+  if (value === "null") return { ok: true, value: null };
+  if (value === "true") return { ok: true, value: true };
+  if (value === "false") return { ok: true, value: false };
+  if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/u.test(value)) {
+    const number = Number(value);
+    if (Number.isFinite(number)) {
+      if (Number.isInteger(number) && !Number.isSafeInteger(number)) {
+        return { ok: false, message: "numeric --where values must be safe integers; quote large identifiers" };
+      }
+      return { ok: true, value: number };
+    }
+  }
+  return { ok: true, value };
+}
+
+function querySort(raw: string): QuerySort | null {
+  const value = raw.trim();
+  if (value === "title" || value === "path" || value === "inbound" || value === "outbound") {
+    return { kind: "builtin", field: value };
+  }
+  const path = value.replace(/^(?:meta|metadata)\./u, "");
+  return path === "" ? null : { kind: "metadata", path };
+}
+
+function parseListCommand(arguments_: readonly string[]): ParseResult {
+  let root = ".";
+  let index: string | undefined;
+  let json = false;
+  let sort: QuerySort = { kind: "builtin", field: "path" };
+  let direction: QueryDirection = "asc";
+  let limit: number | undefined;
+  const filters: MetadataFilter[] = [];
+  const tags: string[] = [];
+
+  for (let cursor = 0; cursor < arguments_.length; cursor += 1) {
+    const argument = arguments_[cursor];
+    if (argument === undefined) continue;
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+    if (
+      argument === "--root"
+      || argument === "--index"
+      || argument === "--where"
+      || argument === "--has"
+      || argument === "--tag"
+      || argument === "--sort"
+      || argument === "--order"
+      || argument === "--limit"
+    ) {
+      const value = readValue(arguments_, cursor);
+      if (value === null) return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--root") root = value;
+      else if (argument === "--index") index = value;
+      else if (argument === "--tag") tags.push(value);
+      else if (argument === "--has") {
+        if (value.trim() === "") return { ok: false, message: "--has requires a metadata path" };
+        filters.push({ kind: "exists", path: value });
+      } else if (argument === "--where") {
+        const equals = value.indexOf("=");
+        const path = equals === -1 ? "" : value.slice(0, equals).trim();
+        if (path === "") return { ok: false, message: "--where requires path=value" };
+        const scalar = metadataScalar(value.slice(equals + 1));
+        if (!scalar.ok) return scalar;
+        filters.push({ kind: "equals", path, value: scalar.value });
+      } else if (argument === "--sort") {
+        const parsed = querySort(value);
+        if (parsed === null) return { ok: false, message: "--sort requires a field" };
+        sort = parsed;
+      } else if (argument === "--order") {
+        if (value !== "asc" && value !== "desc") {
+          return { ok: false, message: "--order must be asc or desc" };
+        }
+        direction = value;
+      } else {
+        const parsed = Number(value);
+        if (!Number.isSafeInteger(parsed) || parsed < 0) {
+          return { ok: false, message: "--limit must be a non-negative integer" };
+        }
+        limit = parsed;
+      }
+      cursor += 1;
+      continue;
+    }
+    return {
+      ok: false,
+      message: argument.startsWith("--")
+        ? "unknown list option"
+        : "list does not accept positional arguments",
+    };
+  }
+
+  return {
+    ok: true,
+    value: {
+      kind: "list",
+      root,
+      options: index === undefined ? {} : { index },
+      filters,
+      tags,
+      sort,
+      direction,
+      ...(limit === undefined ? {} : { limit }),
+      json,
+    },
+  };
+}
+
+function finiteNumber(raw: string, option: string): ParseResult | number {
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : { ok: false, message: `${option} requires a number` };
+}
+
+function parseSemanticCommand(command: "index" | "search", arguments_: readonly string[]): ParseResult {
+  let root = ".";
+  let database: string | undefined;
+  let force = false;
+  let json = false;
+  let mode: SemanticSearchMode = "semantic";
+  let limit: number | undefined;
+  let minScore: number | undefined;
+  const positional: string[] = [];
+
+  for (let cursor = 0; cursor < arguments_.length; cursor += 1) {
+    const argument = arguments_[cursor];
+    if (argument === undefined) continue;
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+    if (argument === "--force" && command === "index") {
+      force = true;
+      continue;
+    }
+    if (argument === "--root" || argument === "--database") {
+      const value = readValue(arguments_, cursor);
+      if (value === null) return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--root") root = value;
+      else database = value;
+      cursor += 1;
+      continue;
+    }
+    if (command === "search" && (argument === "--mode" || argument === "--limit" || argument === "--min-score")) {
+      const value = readValue(arguments_, cursor);
+      if (value === null) return { ok: false, message: `${argument} requires a value` };
+      if (argument === "--mode") {
+        if (value !== "semantic" && value !== "keyword") {
+          return { ok: false, message: "--mode must be semantic or keyword" };
+        }
+        mode = value;
+      } else {
+        const parsed = finiteNumber(value, argument);
+        if (typeof parsed !== "number") return parsed;
+        if (argument === "--limit") limit = parsed;
+        else minScore = parsed;
+      }
+      cursor += 1;
+      continue;
+    }
+    if (argument.startsWith("--")) return { ok: false, message: `unknown ${command} option` };
+    positional.push(argument);
+  }
+
+  if (command === "index") {
+    if (positional.length > 0) return { ok: false, message: "index does not accept positional arguments" };
+    return {
+      ok: true,
+      value: { kind: "index", root, ...(database === undefined ? {} : { database }), force, json },
+    };
+  }
+  const query = positional.join(" ").trim();
+  if (query === "") return { ok: false, message: "search requires a query" };
+  return {
+    ok: true,
+    value: {
+      kind: "search",
+      root,
+      ...(database === undefined ? {} : { database }),
+      mode,
+      ...(limit === undefined ? {} : { limit }),
+      ...(minScore === undefined ? {} : { minScore }),
+      query,
       json,
     },
   };
@@ -164,10 +462,68 @@ export function parseArguments(arguments_: readonly string[]): ParseResult {
     if (positional[0] !== undefined) directory = positional[0];
     return { ok: true, value: { kind: "init", directory, json } };
   }
-  if (command === "refresh" || command === "check" || command === "graph" || command === "backlinks") {
+  if (command === "refresh" || command === "check" || command === "graph" || command === "backlinks" || command === "links") {
     return parseVaultCommand(command, arguments_.slice(1));
   }
+  if (command === "list" || command === "notes") return parseListCommand(arguments_.slice(1));
+  if (command === "index" || command === "search") {
+    return parseSemanticCommand(command, arguments_.slice(1));
+  }
   return { ok: false, message: "unknown command" };
+}
+
+function embeddingCount(result: SemanticIndexResult | SemanticSearchResult): number {
+  return result.embedding?.chunksEmbedded ?? 0;
+}
+
+function renderSemanticIndex(result: SemanticIndexResult): string {
+  const changed = result.update.indexed + result.update.updated;
+  return [
+    `Indexed ${safe(result.root)} with QMD.`,
+    `Documents: ${changed} changed, ${result.update.unchanged} unchanged, ${result.update.removed} removed.`,
+    `Embeddings: ${embeddingCount(result)} chunks; model: ${safe(result.model)}.`,
+    `Database: ${safe(result.database)}`,
+    "",
+  ].join("\n");
+}
+
+function renderSemanticSearch(result: SemanticSearchResult): string {
+  const lines = [
+    `${result.mode === "semantic" ? "Semantic" : "Keyword"} results for “${safe(result.query)}” (${result.results.length})`,
+  ];
+  if (result.results.length === 0) lines.push("  None.");
+  for (const hit of result.results) {
+    const location = `${safe(hit.path)}${hit.line === undefined ? "" : `:${hit.line}`}`;
+    lines.push(`  ${hit.score.toFixed(3)}  ${location} — ${safe(hit.title)}`);
+    if (hit.snippet !== "") lines.push(`    ${safe(hit.snippet)}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+async function runSemantic(
+  command: Extract<ParsedCommand, { readonly kind: "index" | "search" }>,
+  output: Output,
+  dependencies: CliDependencies,
+): Promise<number> {
+  if (command.kind === "index") {
+    const result = await (dependencies.indexSemanticVault ?? indexSemanticVault)({
+      root: command.root,
+      ...(command.database === undefined ? {} : { database: command.database }),
+      force: command.force,
+    });
+    output.stdout(command.json ? terminalSafeJson(result) : sanitizeTerminalText(renderSemanticIndex(result)));
+    return 0;
+  }
+  const result = await (dependencies.searchSemanticVault ?? searchSemanticVault)({
+    root: command.root,
+    query: command.query,
+    mode: command.mode,
+    ...(command.database === undefined ? {} : { database: command.database }),
+    ...(command.limit === undefined ? {} : { limit: command.limit }),
+    ...(command.minScore === undefined ? {} : { minScore: command.minScore }),
+  });
+  output.stdout(command.json ? terminalSafeJson(result) : sanitizeTerminalText(renderSemanticSearch(result)));
+  return 0;
 }
 
 function issueJson(issue: LinkIssue): Record<string, unknown> {
@@ -266,6 +622,56 @@ function renderBacklinks(notePath: string, backlinks: readonly Backlink[]): stri
   return `${lines.join("\n")}\n`;
 }
 
+function renderLinks(neighborhood: LinkNeighborhood): string {
+  const lines = [
+    `Links around ${safe(neighborhood.note)} (${neighborhood.direction}, depth ${neighborhood.depth}, limit ${neighborhood.limit})`,
+  ];
+  for (const node of neighborhood.nodes) {
+    lines.push(
+      `  ${node.distance}  ${safe(node.path)} — ${safe(node.title)}  ← ${node.inboundContextualCount}  → ${node.outboundContextualCount}`,
+    );
+  }
+  if (neighborhood.edges.length > 0) {
+    lines.push("Edges:");
+    for (const edge of neighborhood.edges) {
+      lines.push(`  ${safe(edge.source)}:${edge.line} → ${safe(edge.target)}`);
+    }
+  }
+  if (neighborhood.truncated) lines.push(`Truncated at ${neighborhood.limit} notes; lower the depth or raise --limit.`);
+  return `${lines.join("\n")}\n`;
+}
+
+function renderList(rows: readonly QueryRow[]): string {
+  const lines = [`Notes (${rows.length})`];
+  if (rows.length === 0) lines.push("  None.");
+  for (const row of rows) {
+    const tags = row.tags.length === 0 ? "" : `  #${row.tags.map(safe).join(" #")}`;
+    lines.push(
+      `  ${safe(row.path)} — ${safe(row.title)}  ← ${row.inboundContextualCount}  → ${row.outboundContextualCount}${tags}`,
+    );
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+async function runList(
+  command: Extract<ParsedCommand, { readonly kind: "list" }>,
+  output: Output,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const snapshot = await (dependencies.scanVault ?? scanVault)(command.root, command.options);
+  const rows = queryVault(snapshot.notes, snapshot.analysis, {
+    filters: command.filters,
+    tags: command.tags,
+    sort: command.sort,
+    direction: command.direction,
+    ...(command.limit === undefined ? {} : { limit: command.limit }),
+  });
+  output.stdout(command.json
+    ? terminalSafeJson({ root: snapshot.root, count: rows.length, notes: rows })
+    : sanitizeTerminalText(renderList(rows)));
+  return 0;
+}
+
 async function runInit(
   command: Extract<ParsedCommand, { readonly kind: "init" }>,
   output: Output,
@@ -311,6 +717,17 @@ async function runVault(
     }
     return 3;
   }
+  if (command.kind === "links") {
+    const neighborhood = navigateLinks(snapshot.notes, snapshot.analysis, lookup.note, {
+      direction: command.direction ?? "both",
+      depth: command.depth ?? 1,
+      ...(command.limit === undefined ? {} : { limit: command.limit }),
+    });
+    output.stdout(command.json
+      ? terminalSafeJson(neighborhood)
+      : sanitizeTerminalText(renderLinks(neighborhood)));
+    return 0;
+  }
   const connection = snapshot.analysis.noteConnections.find(({ id }) => id === lookup.note.id);
   const backlinks = connection?.backlinks ?? [];
   output.stdout(command.json
@@ -342,6 +759,10 @@ export async function main(
     if (command.kind === "init") {
       return await runInit(command, output, dependencies.initVault ?? initVault);
     }
+    if (command.kind === "index" || command.kind === "search") {
+      return await runSemantic(command, output, dependencies);
+    }
+    if (command.kind === "list") return await runList(command, output, dependencies);
     return await runVault(command, output, dependencies);
   } catch (error) {
     output.stderr(`error: ${safe(error instanceof Error ? error.message : String(error))}\n`);

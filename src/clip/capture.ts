@@ -17,11 +17,13 @@ import {
   acquireCookieRecords,
   acquireFile,
   acquireHttp,
+  assertSafePersistentProfile,
   type AcquiredPage,
   type AcquisitionMethod,
 } from "./acquire.js";
-import type { CaptureArguments, CaptureScope } from "./args.js";
+import { captureUrl, type CaptureArguments, type CaptureScope } from "./args.js";
 import { localizeAssets, sniffImage, type AssetRecord } from "./assets.js";
+import { cloneBrowserProfile } from "./browser-profiles.js";
 import { canonicalizeUrl, chooseBestExtraction, countWords, extractPage, type ExtractedPage, type Platform } from "./extract.js";
 import {
   buildClipMarkdown,
@@ -37,6 +39,7 @@ import {
   commitCaptureBundle,
   redactSensitiveText,
   redactSensitiveTextWithCount,
+  sanitizeArtifactUrl,
   writeCaptureBundle,
   type CaptureBundleTransaction,
   type CaptureManifest,
@@ -103,7 +106,9 @@ const browserFirstPlatforms = new Set<Platform>([
 /** Resolve `auto` to the useful default for each content family. */
 export function effectiveScope(platform: Platform, scope: CaptureScope): Exclude<CaptureScope, "auto"> {
   if (scope !== "auto") return scope;
-  if (platform === "hacker-news" || platform === "reddit") return "comments";
+  if (platform === "hacker-news" || platform === "reddit" || platform === "github" || platform === "discourse") {
+    return "comments";
+  }
   if (platform === "x" || platform === "bluesky") return "thread";
   return "page";
 }
@@ -119,6 +124,10 @@ function stableContentId(url: URL): string | null {
       return classified.itemId;
     case "reddit":
       return classified.commentId ?? classified.postId;
+    case "github":
+      return classified.contentId;
+    case "discourse":
+      return classified.topicId;
     case "instagram":
     case "linkedin":
     case "facebook":
@@ -138,7 +147,9 @@ export function captureSlug(options: CaptureArguments, extraction: ExtractedPage
   if (options.slug !== undefined) return slugify(options.slug);
   const fallback = extraction.canonicalUrl.pathname.split("/").filter(Boolean).at(-1)
     ?? extraction.canonicalUrl.hostname;
-  const base = slugify(extraction.article.title ?? fallback);
+  // Page titles are foreign content and can reflect credential-bearing URLs.
+  // Redact them before they become persistent directory or file names.
+  const base = slugify(redactSensitiveText(extraction.article.title ?? fallback));
   const id = stableContentId(extraction.canonicalUrl);
   if (id === null) return base;
   const idSlug = slugify(id);
@@ -297,13 +308,23 @@ function cookieMediaOptions(options: CaptureArguments): {
   readonly cookiesFile?: string;
 } {
   const source = options.cookieSources[0] ?? (options.browserProfile === undefined ? undefined : "chrome");
-  const profile = options.cookieSources.length > 0 ? options.cookieProfile : options.browserProfile;
+  const profile = options.cookieSources.length > 0
+    ? options.cookieProfile
+    : selectedBrowserCookieProfile(options);
   return {
     ...(source === undefined
       ? {}
       : { cookieBrowser: { source, ...(profile === undefined ? {} : { profile }) } }),
     ...(options.cookiesFile === undefined ? {} : { cookiesFile: options.cookiesFile }),
   };
+}
+
+/** Address the selected profile directory, not only its Chromium user-data parent. */
+function selectedBrowserCookieProfile(options: CaptureArguments): string | undefined {
+  if (options.browserProfile === undefined) return undefined;
+  return options.browserProfileDirectory === undefined
+    ? options.browserProfile
+    : join(options.browserProfile, options.browserProfileDirectory);
 }
 
 function assetCookieProvider(
@@ -315,7 +336,11 @@ function assetCookieProvider(
   if (!explicit && options.browserProfile === undefined) return undefined;
   const effective = explicit
     ? options
-    : { ...options, cookieSources: ["chrome"] as const, cookieProfile: options.browserProfile };
+    : {
+        ...options,
+        cookieSources: ["chrome"] as const,
+        cookieProfile: selectedBrowserCookieProfile(options),
+      };
   let records: ReturnType<typeof reader> | undefined;
   return (url) => {
     if (url.origin !== authorizedUrl.origin) return Promise.resolve(null);
@@ -326,6 +351,25 @@ function assetCookieProvider(
       const header = renderCookieHeader(filterCookies(result.cookies, url).cookies);
       return header === "" ? null : header;
     });
+  };
+}
+
+/** Run path-backed profiles from a temporary copy shared by every browser lane in one capture. */
+export function withBrowserProfileSnapshot(
+  options: CaptureArguments,
+  temporaryDirectory: string,
+): CaptureArguments {
+  if (options.browserProfile === undefined || options.browserProfileOwnership === "owned") return options;
+  const source = assertSafePersistentProfile(options);
+  if (source === null) return options;
+  const cloned = cloneBrowserProfile(source, temporaryDirectory);
+  return {
+    ...options,
+    browserProfile: cloned.userDataPath,
+    browserProfileOwnership: "owned",
+    ...(cloned.profileDirectory === undefined
+      ? {}
+      : { browserProfileDirectory: cloned.profileDirectory }),
   };
 }
 
@@ -349,25 +393,41 @@ export async function runCapture(
     captureMedia: dependencies.captureMedia ?? captureMedia,
     now: dependencies.now ?? (() => new Date()),
   };
-  const platform: Platform = classifyPlatformUrl(rawOptions.url.href)?.platform ?? "generic";
-  const sourceUrl = canonicalizeUrl(rawOptions.url, platform).href;
-  const scope = effectiveScope(platform, rawOptions.scope);
-  const options: CaptureArguments = { ...rawOptions, scope };
-  const candidates: ExtractedPage[] = [];
-  const attempts: CaptureAttempt[] = [];
-  const browserOperationalWarnings: string[] = [];
-  let structuredCapture: PublicStructuredCapture | null = null;
-  const browserScreenshots = new Map<AcquiredPage, string>();
   const browserTemporaryDirectory = mkdtempSync(join(tmpdir(), "cclrte-kb-browser-"));
   chmodSync(browserTemporaryDirectory, 0o700);
 
   try {
+    const preparedOptions = withBrowserProfileSnapshot(rawOptions, browserTemporaryDirectory);
+    let currentBrowser: AcquiredPage | null = null;
+    let resolvedOptions = preparedOptions;
+    if (preparedOptions.currentTab) {
+      try {
+        const acquired = await deps.acquireBrowser(preparedOptions, browserTemporaryDirectory, false);
+        const sanitizedUrl = new URL(sanitizeArtifactUrl(acquired.finalUrl.href));
+        currentBrowser = sanitizedUrl.href === acquired.finalUrl.href
+          ? acquired
+          : { ...acquired, finalUrl: sanitizedUrl };
+      } catch (error) {
+        throw new Error(`current browser acquisition failed: ${safeAttemptMessage(error)}`, { cause: error });
+      }
+      resolvedOptions = { ...preparedOptions, url: currentBrowser.finalUrl, mode: "browser" };
+    }
+    const requestedUrl = captureUrl(resolvedOptions);
+    const platform: Platform = classifyPlatformUrl(requestedUrl.href)?.platform ?? "generic";
+    const sourceUrl = canonicalizeUrl(requestedUrl, platform).href;
+    const scope = effectiveScope(platform, resolvedOptions.scope);
+    const options: CaptureArguments = { ...resolvedOptions, scope };
+    const candidates: ExtractedPage[] = [];
+    const attempts: CaptureAttempt[] = [];
+    const browserOperationalWarnings: string[] = [];
+    let structuredCapture: PublicStructuredCapture | null = null;
+    const browserScreenshots = new Map<AcquiredPage, string>();
     const eagerBrowserCandidates: ExtractedPage[] = [];
     const eagerBrowserAttempts: CaptureAttempt[] = [];
     const eagerBrowserRequested = options.mode === "auto" && browserFirstPlatforms.has(platform);
     if (eagerBrowserRequested && (options.browserLive || options.cdp !== undefined)) {
       browserOperationalWarnings.push(
-        "An attached browser attempt may have navigated, clicked eligible disclosure controls, and scrolled the active tab even if that candidate was not selected.",
+        "An attached browser attempt may have navigated and scrolled the active tab even if that candidate was not selected.",
       );
     } else if (
       eagerBrowserRequested
@@ -389,7 +449,20 @@ export async function runCapture(
           eagerBrowserAttempts,
         )
       : null;
-    if (options.mode === "file") {
+    if (options.currentTab) {
+      if (currentBrowser === null) throw new Error("current browser acquisition did not produce a page");
+      const browser = await tryAcquisition(
+        options.browserLive ? "browser-live-current" : "browser-cdp-current",
+        () => Promise.resolve(currentBrowser),
+        scope,
+        options.timeoutMs,
+        deps.extractPage,
+        candidates,
+        attempts,
+      );
+      if (browser !== null) browserOperationalWarnings.push(...browser.warnings);
+      if (browser?.screenshotPath !== undefined) browserScreenshots.set(browser, browser.screenshotPath);
+    } else if (options.mode === "file") {
       await tryAcquisition("file", () => deps.acquireFile(options), scope, options.timeoutMs, deps.extractPage, candidates, attempts);
     } else {
       if (options.mode === "auto" || options.mode === "http") {
@@ -431,7 +504,7 @@ export async function runCapture(
       } else if (shouldUseBrowser(options, platform, scope, candidates)) {
         if (options.browserLive || options.cdp !== undefined) {
           browserOperationalWarnings.push(
-            "An attached browser attempt may have navigated, clicked eligible disclosure controls, and scrolled the active tab even if that candidate was not selected.",
+            "An attached browser attempt may have navigated and scrolled the active tab even if that candidate was not selected.",
           );
         } else if (
           options.browserProfile !== undefined

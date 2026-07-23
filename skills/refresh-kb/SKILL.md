@@ -9,7 +9,9 @@ Use a refresh-review-check loop. Keep authored prose under deliberate editorial 
 
 ## 1. Locate the vault
 
-- Resolve `<vault>` to the directory containing the managed `index.md`.
+- Resolve `<vault>` to the directory containing the managed `index.md`, then
+  set the shell-local `KB_ROOT` to that path (`KB_ROOT=kb` from a typical
+  repository root, or `KB_ROOT=.` from inside the vault).
 - Read the vault's applicable agent instructions and note conventions before editing.
 - Preserve note voice, frontmatter, filenames, and link intent unless a reported finding justifies a specific change.
 
@@ -18,7 +20,7 @@ Use a refresh-review-check loop. Keep authored prose under deliberate editorial 
 Run:
 
 ```sh
-kb refresh --root <vault>
+kb refresh --root "$KB_ROOT"
 ```
 
 This command atomically updates only the marked catalog region in `index.md` and reports graph findings. Catalog links are navigation, so they do not count as contextual graph edges.
@@ -42,7 +44,7 @@ Intentional orphans and unlinked mentions may remain. Record the reason instead 
 After any note or link edit, run the refresh command again so the catalog and advisories reflect the final content. Then run the read-only gate:
 
 ```sh
-kb check --root <vault>
+kb check --root "$KB_ROOT"
 ```
 
 Finish only when the check succeeds, the managed catalog is current, and broken or ambiguous links are resolved. Summarize deliberate link edits and any advisories intentionally left in place.

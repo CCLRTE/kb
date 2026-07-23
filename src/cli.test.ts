@@ -55,6 +55,141 @@ describe("kb argument parsing", () => {
         },
       });
   });
+
+  test("parses explicit semantic index and search options", () => {
+    expect(parseArguments(["index", "--root", "vault", "--database", "cache.sqlite", "--force", "--json"]))
+      .toEqual({
+        ok: true,
+        value: {
+          kind: "index",
+          root: "vault",
+          database: "cache.sqlite",
+          force: true,
+          json: true,
+        },
+      });
+    expect(parseArguments([
+      "search",
+      "bounded",
+      "ingestion",
+      "--root",
+      "vault",
+      "--mode",
+      "keyword",
+      "--limit",
+      "4",
+      "--min-score",
+      "0.2",
+    ])).toEqual({
+      ok: true,
+      value: {
+        kind: "search",
+        root: "vault",
+        mode: "keyword",
+        limit: 4,
+        minScore: 0.2,
+        query: "bounded ingestion",
+        json: false,
+      },
+    });
+    expect(parseArguments(["search", "query", "--mode", "unknown"])).toEqual({
+      ok: false,
+      message: "--mode must be semantic or keyword",
+    });
+  });
+
+  test("parses metadata queries and bounded graph navigation", () => {
+    expect(parseArguments([
+      "list",
+      "--root",
+      "vault",
+      "--where",
+      "type=plan",
+      "--where",
+      "priority=2",
+      "--has",
+      "owner.name",
+      "--tag",
+      "Browser",
+      "--sort",
+      "meta.area",
+      "--order",
+      "desc",
+      "--limit",
+      "5",
+      "--json",
+    ])).toEqual({
+      ok: true,
+      value: {
+        kind: "list",
+        root: "vault",
+        options: {},
+        filters: [
+          { kind: "equals", path: "type", value: "plan" },
+          { kind: "equals", path: "priority", value: 2 },
+          { kind: "exists", path: "owner.name" },
+        ],
+        tags: ["Browser"],
+        sort: { kind: "metadata", path: "area" },
+        direction: "desc",
+        limit: 5,
+        json: true,
+      },
+    });
+    expect(parseArguments([
+      "links",
+      "Agent memory",
+      "--root",
+      "vault",
+      "--direction",
+      "in",
+      "--depth",
+      "3",
+      "--limit",
+      "25",
+    ])).toEqual({
+      ok: true,
+      value: {
+        kind: "links",
+        root: "vault",
+        options: {},
+        json: false,
+        note: "Agent memory",
+        direction: "in",
+        depth: 3,
+        limit: 25,
+      },
+    });
+  });
+
+  test("distinguishes typed filters from quoted string values without rounding identifiers", () => {
+    expect(parseArguments([
+      "list",
+      "--where",
+      'enabled="true"',
+      "--where",
+      "unset='null'",
+      "--where",
+      'external_id="9007199254740993"',
+    ])).toMatchObject({
+      ok: true,
+      value: {
+        filters: [
+          { kind: "equals", path: "enabled", value: "true" },
+          { kind: "equals", path: "unset", value: "null" },
+          { kind: "equals", path: "external_id", value: "9007199254740993" },
+        ],
+      },
+    });
+    expect(parseArguments([
+      "list",
+      "--where",
+      "external_id=9007199254740993",
+    ])).toEqual({
+      ok: false,
+      message: "numeric --where values must be safe integers; quote large identifiers",
+    });
+  });
 });
 
 describe("kb vault commands", () => {
@@ -69,7 +204,16 @@ describe("kb vault commands", () => {
       await mkdir(join(vault, "notes"), { recursive: true });
       const alphaPath = join(vault, "notes", "alpha.md");
       await writeFile(alphaPath, "# Alpha\n\nSee [[notes/beta]].\n", "utf8");
-      await writeFile(join(vault, "notes", "beta.md"), "# Beta\n", "utf8");
+      await writeFile(join(vault, "notes", "beta.md"), [
+        "---",
+        "type: plan",
+        "area: agent-memory",
+        "status: in-progress",
+        "tags: [browser, ingestion]",
+        "---",
+        "# Beta",
+        "",
+      ].join("\n"), "utf8");
 
       const staleOutput = captureOutput();
       expect(await main(["check", "--root", vault], staleOutput.output)).toBe(3);
@@ -89,6 +233,42 @@ describe("kb vault commands", () => {
       const backlinkOutput = captureOutput();
       expect(await main(["backlinks", "Beta", "--root", vault], backlinkOutput.output)).toBe(0);
       expect(backlinkOutput.stdout()).toContain("notes/alpha.md:3");
+
+      const listOutput = captureOutput();
+      expect(await main([
+        "list",
+        "--root",
+        vault,
+        "--where",
+        "type=plan",
+        "--tag",
+        "BROWSER",
+        "--sort",
+        "area",
+        "--json",
+      ], listOutput.output)).toBe(0);
+      expect(JSON.parse(listOutput.stdout())).toMatchObject({
+        count: 1,
+        notes: [{ path: "notes/beta.md", tags: ["browser", "ingestion"] }],
+      });
+
+      const linksOutput = captureOutput();
+      expect(await main([
+        "links",
+        "Beta",
+        "--root",
+        vault,
+        "--direction",
+        "in",
+        "--json",
+      ], linksOutput.output)).toBe(0);
+      expect(JSON.parse(linksOutput.stdout())).toMatchObject({
+        note: "notes/beta.md",
+        direction: "in",
+        limit: 50,
+        truncated: false,
+        nodes: [{ path: "notes/beta.md", distance: 0 }, { path: "notes/alpha.md", distance: 1 }],
+      });
       expect(await Bun.file(alphaPath).text()).toBe("# Alpha\n\nSee [[notes/beta]].\n");
     } finally {
       await rm(temporary, { recursive: true, force: true });
@@ -106,6 +286,71 @@ describe("kb vault commands", () => {
     });
     expect(exitCode).toBe(3);
     expect(captured).toEqual([["capture", "https://example.com", "--json"]]);
+  });
+
+  test("delegates local semantic indexing and search without loading QMD in other commands", async () => {
+    const indexedArguments: unknown[] = [];
+    const searchedArguments: unknown[] = [];
+    const indexOutput = captureOutput();
+    expect(await main(["index", "--root", "vault", "--json"], indexOutput.output, {
+      indexSemanticVault: (options) => {
+        indexedArguments.push(options);
+        return Promise.resolve({
+          root: "/vault",
+          database: "/cache/index.sqlite",
+          model: "local-model",
+          update: { collections: 1, indexed: 1, updated: 0, unchanged: 0, removed: 0, needsEmbedding: 1 },
+          embedding: { docsProcessed: 1, chunksEmbedded: 2, errors: 0, durationMs: 1 },
+        });
+      },
+    })).toBe(0);
+    expect(indexedArguments).toEqual([{ root: "vault", force: false }]);
+    expect(JSON.parse(indexOutput.stdout())).toMatchObject({ model: "local-model" });
+
+    const searchOutput = captureOutput();
+    expect(await main([
+      "search",
+      "agent memory",
+      "--root",
+      "vault",
+      "--limit",
+      "3",
+    ], searchOutput.output, {
+      searchSemanticVault: (options) => {
+        searchedArguments.push(options);
+        return Promise.resolve({
+          root: "/vault",
+          database: "/cache/index.sqlite",
+          model: "local-model",
+          mode: "semantic",
+          query: "agent memory",
+          update: { collections: 1, indexed: 0, updated: 0, unchanged: 1, removed: 0, needsEmbedding: 0 },
+          embedding: null,
+          results: [{
+            path: "notes/memory.md",
+            title: "Agent memory",
+            score: 0.9,
+            source: "vec",
+            docid: "abc123",
+            modifiedAt: "2026-07-22T12:00:00.000Z",
+            line: 4,
+            snippet: "Durable context for coding agents.",
+            tags: ["agents"],
+            metadata: { type: "note" },
+            inboundContextualCount: 2,
+            outboundContextualCount: 1,
+            backlinks: [],
+          }],
+        });
+      },
+    })).toBe(0);
+    expect(searchedArguments).toEqual([{
+      root: "vault",
+      query: "agent memory",
+      mode: "semantic",
+      limit: 3,
+    }]);
+    expect(searchOutput.stdout()).toContain("notes/memory.md:4");
   });
 
   test("reports broken links as check failures and sanitizes thrown terminal text", async () => {

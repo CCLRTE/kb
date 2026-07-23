@@ -1,100 +1,182 @@
 // @bun
 // src/graph.ts
 import { posix } from "path";
+import { parseDocument } from "yaml";
 var catalogStart = "<!-- kb:catalog:start -->";
 var catalogEnd = "<!-- kb:catalog:end -->";
+function isMetadataObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function parsedMetadataValue(value, ancestors) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return { ok: true, value };
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) && (!Number.isInteger(value) || Number.isSafeInteger(value)) ? { ok: true, value } : { ok: false };
+  }
+  if (typeof value !== "object" || ancestors.has(value))
+    return { ok: false };
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) {
+      const parsed2 = [];
+      const ownKeys = Reflect.ownKeys(value);
+      if (ownKeys.some((key) => typeof key !== "string" || key !== "length" && !/^(?:0|[1-9]\d*)$/u.test(key))) {
+        return { ok: false };
+      }
+      for (let index = 0;index < value.length; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (descriptor === undefined || !("value" in descriptor))
+          return { ok: false };
+        const result = parsedMetadataValue(descriptor.value, ancestors);
+        if (!result.ok)
+          return result;
+        parsed2.push(result.value);
+      }
+      return { ok: true, value: parsed2 };
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null)
+      return { ok: false };
+    const parsed = Object.create(null);
+    for (const key of Reflect.ownKeys(value)) {
+      if (typeof key !== "string")
+        return { ok: false };
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) {
+        return { ok: false };
+      }
+      const result = parsedMetadataValue(descriptor.value, ancestors);
+      if (!result.ok)
+        return result;
+      Object.defineProperty(parsed, key, {
+        configurable: false,
+        enumerable: true,
+        value: result.value,
+        writable: false
+      });
+    }
+    return { ok: true, value: parsed };
+  } finally {
+    ancestors.delete(value);
+  }
+}
+function metadataValueFromUnknown(value) {
+  try {
+    const parsed = parsedMetadataValue(value, new WeakSet);
+    return parsed.ok ? parsed.value : undefined;
+  } catch {
+    return;
+  }
+}
+function metadataObjectFromUnknown(value) {
+  if (value === null || Array.isArray(value) || typeof value !== "object")
+    return null;
+  const parsed = metadataValueFromUnknown(value);
+  return parsed !== undefined && isMetadataObject(parsed) ? parsed : null;
+}
+function emptyMetadata() {
+  return Object.create(null);
+}
+function parseMetadata(source, path) {
+  if (source.trim() === "")
+    return emptyMetadata();
+  try {
+    const document = parseDocument(source, {
+      schema: "core",
+      uniqueKeys: true
+    });
+    if (document.errors.length > 0) {
+      throw new Error("the YAML parser reported an error");
+    }
+    if (document.contents === null)
+      return emptyMetadata();
+    const parsed = document.toJS({ mapAsMap: false, maxAliasCount: 50 });
+    const metadata = metadataObjectFromUnknown(parsed);
+    if (metadata === null)
+      throw new Error("the YAML document is not a JSON-like object");
+    return metadata;
+  } catch (error) {
+    throw new Error(`Invalid YAML frontmatter in ${path}.`, { cause: error });
+  }
+}
+function metadataProperty(metadata, name) {
+  if (Object.hasOwn(metadata, name))
+    return metadata[name];
+  const lowerName = name.toLocaleLowerCase("en-US");
+  const matches = Object.keys(metadata).filter((key) => key.toLocaleLowerCase("en-US") === lowerName);
+  return matches.length === 1 ? metadata[matches[0] ?? ""] : undefined;
+}
+function normalizedTags(metadata) {
+  const value = metadataProperty(metadata, "tags");
+  const candidates = typeof value === "string" ? [value] : Array.isArray(value) ? value.filter((candidate) => typeof candidate === "string") : [];
+  const tags = [];
+  const seen = new Set;
+  for (const candidate of candidates) {
+    const tag = candidate.trim().replace(/^#+/u, "").normalize("NFC").toLocaleLowerCase("en-US");
+    if (tag === "" || seen.has(tag))
+      continue;
+    seen.add(tag);
+    tags.push(tag);
+  }
+  return tags;
+}
 var normalizeVaultPath = (path) => posix.normalize(path.replaceAll("\\", "/")).replace(/^\.\//, "");
 var withoutMarkdownExtension = (path) => path.toLowerCase().endsWith(".md") ? path.slice(0, -3) : path;
-function scalarValue(raw) {
-  const value = raw.trim();
-  if (value.startsWith('"') && value.endsWith('"')) {
-    try {
-      const parsed = JSON.parse(value);
-      if (typeof parsed === "string")
-        return parsed;
-    } catch {
-      return value.slice(1, -1);
-    }
-  }
-  if (value.startsWith("'") && value.endsWith("'")) {
-    return value.slice(1, -1).replaceAll("''", "'");
-  }
-  return value;
+function legacyPropertyValue(value) {
+  if (typeof value === "string")
+    return value;
+  if (typeof value === "number" || typeof value === "boolean")
+    return String(value);
+  if (value === null)
+    return "null";
+  return;
 }
-function parseInlineList(raw) {
-  const value = raw.trim();
-  if (!value.startsWith("[") || !value.endsWith("]")) {
-    const scalar = scalarValue(value);
-    return scalar === "" ? [] : [scalar];
-  }
-  const body = value.slice(1, -1);
-  const items = [];
-  let start = 0;
-  let quote = null;
-  for (let index = 0;index < body.length; index += 1) {
-    const character = body[index] ?? "";
-    if (quote === "single") {
-      if (character === "'" && body[index + 1] === "'")
-        index += 1;
-      else if (character === "'")
-        quote = null;
-      continue;
-    }
-    if (quote === "double") {
-      if (character === "\\")
-        index += 1;
-      else if (character === '"')
-        quote = null;
-      continue;
-    }
-    if (character === "'")
-      quote = "single";
-    else if (character === '"')
-      quote = "double";
-    else if (character === ",") {
-      items.push(body.slice(start, index));
-      start = index + 1;
-    }
-  }
-  items.push(body.slice(start));
-  return items.map((item) => scalarValue(item)).filter((item) => item !== "");
+function aliasesFromMetadata(metadata) {
+  const value = metadataProperty(metadata, "aliases");
+  if (typeof value === "string")
+    return value.trim() === "" ? [] : [value];
+  if (!Array.isArray(value))
+    return [];
+  return value.filter((candidate) => typeof candidate === "string" && candidate.trim() !== "");
 }
-function frontmatterOf(content) {
+function frontmatterOf(content, path) {
   const lines = content.split(`
 `);
-  if (lines[0]?.trim() !== "---")
-    return { values: new Map, aliases: [] };
+  if (lines[0]?.trim() !== "---") {
+    return {
+      values: new Map,
+      aliases: [],
+      tags: [],
+      metadata: emptyMetadata()
+    };
+  }
   const end = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
-  if (end === -1)
-    return { values: new Map, aliases: [] };
+  if (end === -1) {
+    throw new Error(`Invalid YAML frontmatter in ${path}: missing closing delimiter.`);
+  }
+  const metadata = parseMetadata(lines.slice(1, end).join(`
+`), path);
   const values = new Map;
-  const aliases = [];
-  for (let index = 1;index < end; index += 1) {
-    const line = lines[index] ?? "";
-    const property = /^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/.exec(line);
-    if (property === null)
-      continue;
-    const key = property[1]?.toLowerCase() ?? "";
-    const raw = property[2] ?? "";
-    if (key === "aliases") {
-      if (raw.trim() !== "")
-        aliases.push(...parseInlineList(raw));
-      for (let child = index + 1;child < end; child += 1) {
-        const item = /^\s+-\s+(.+)$/.exec(lines[child] ?? "");
-        if (item === null)
-          break;
-        const alias = scalarValue(item[1] ?? "");
-        if (alias !== "")
-          aliases.push(alias);
-        index = child;
-      }
-      continue;
+  const seenKeys = new Set;
+  for (const [authoredKey, typedValue] of Object.entries(metadata)) {
+    const key = authoredKey.toLocaleLowerCase("en-US");
+    if (seenKeys.has(key)) {
+      throw new Error(`Invalid YAML frontmatter in ${path}: keys must not differ only by case.`);
     }
-    const value = scalarValue(raw);
-    if (value !== "")
+    seenKeys.add(key);
+    if (key === "aliases")
+      continue;
+    const value = legacyPropertyValue(typedValue);
+    if (value !== undefined && value !== "")
       values.set(key, value);
   }
-  return { values, aliases };
+  return {
+    values,
+    aliases: aliasesFromMetadata(metadata),
+    tags: normalizedTags(metadata),
+    metadata
+  };
 }
 function searchableMarkdown(content) {
   const lines = content.split(`
@@ -306,7 +388,7 @@ function wikiLinks(searchable) {
 }
 function parseNote(path, content) {
   const notePath = normalizeVaultPath(path);
-  const metadata = frontmatterOf(content);
+  const metadata = frontmatterOf(content, notePath);
   const searchable = searchableMarkdown(content);
   const fallback = posix.basename(withoutMarkdownExtension(notePath)).replaceAll("-", " ");
   const title = metadata.values.get("title") ?? firstHeading(searchable) ?? fallback;
@@ -316,7 +398,9 @@ function parseNote(path, content) {
     id: withoutMarkdownExtension(notePath),
     title,
     aliases: metadata.aliases,
+    tags: metadata.tags,
     properties: Object.fromEntries(metadata.values),
+    metadata: metadata.metadata,
     content,
     summary,
     searchableText: searchable,
@@ -594,4 +678,4 @@ function replaceCatalog(indexContent, catalog) {
   return indexContent.slice(0, start) + catalog + indexContent.slice(end + catalogEnd.length);
 }
 
-export { catalogStart, catalogEnd, normalizeVaultPath, searchableMarkdown, wikiLinks, parseNote, lookupNote, analyzeVault, renderCatalog, replaceCatalog };
+export { catalogStart, catalogEnd, metadataValueFromUnknown, normalizeVaultPath, searchableMarkdown, wikiLinks, parseNote, lookupNote, analyzeVault, renderCatalog, replaceCatalog };

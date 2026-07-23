@@ -7,6 +7,7 @@ import { acquirePublicStructured, structuredCaptureFromDocument, type JsonFetche
 const options = (url: string, overrides: Partial<CaptureArguments> = {}): CaptureArguments => ({
   command: "inspect",
   url: new URL(url),
+  currentTab: false,
   slug: undefined,
   mode: "auto",
   scope: "comments",
@@ -21,7 +22,6 @@ const options = (url: string, overrides: Partial<CaptureArguments> = {}): Captur
   browserProfile: undefined,
   browserLive: false,
   cdp: undefined,
-  trustAttachedBrowserEgress: false,
   cookieSources: [],
   cookieProfile: undefined,
   cookiesFile: undefined,

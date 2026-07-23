@@ -5,6 +5,7 @@ import {
   catalogEnd,
   catalogStart,
   lookupNote,
+  metadataValueFromUnknown,
   parseNote,
   renderCatalog,
   replaceCatalog,
@@ -46,6 +47,122 @@ describe("note parsing", () => {
     ].join("\n"));
 
     expect(note.aliases).toEqual(["Smith, John", "Johnny, Jr.", "John Smith"]);
+  });
+
+  test("retains typed nested metadata while preserving scalar properties", () => {
+    const note = parseNote("notes/metadata.md", [
+      "---",
+      "title: 'Metadata note'",
+      "status: in-progress",
+      "priority: 3",
+      "published: false",
+      "tags: [AI, 'Knowledge Graph', '#AI']",
+      "owner:",
+      "  name: Alice",
+      "  teams:",
+      "    - Research",
+      "    - Platform",
+      "---",
+      "# Ignored heading",
+    ].join("\n"));
+
+    expect(note.title).toBe("Metadata note");
+    expect(note.properties).toMatchObject({
+      title: "Metadata note",
+      status: "in-progress",
+      priority: "3",
+      published: "false",
+    });
+    expect(note.tags).toEqual(["ai", "knowledge graph"]);
+    expect(note.metadata).toEqual({
+      title: "Metadata note",
+      status: "in-progress",
+      priority: 3,
+      published: false,
+      tags: ["AI", "Knowledge Graph", "#AI"],
+      owner: { name: "Alice", teams: ["Research", "Platform"] },
+    });
+  });
+
+  test("normalizes block-list tags without changing their typed source values", () => {
+    const note = parseNote("notes/tags.md", [
+      "---",
+      "tags:",
+      "  - ' Local First '",
+      "  - '#Tools'",
+      "  - local first",
+      "---",
+      "# Tags",
+    ].join("\n"));
+
+    expect(note.tags).toEqual(["local first", "tools"]);
+    expect(note.metadata.tags).toEqual([" Local First ", "#Tools", "local first"]);
+  });
+
+  test("rejects malformed or ambiguous frontmatter instead of splitting typed and legacy views", () => {
+    expect(() => parseNote("plans/duplicate.md", [
+      "---",
+      "type: plan",
+      "status: in-progress",
+      "status: completed",
+      "area: kb",
+      "---",
+      "# Duplicate status",
+    ].join("\n"))).toThrow("Invalid YAML frontmatter in plans/duplicate.md");
+
+    expect(() => parseNote("notes/case.md", [
+      "---",
+      "Status: current",
+      "status: stale",
+      "---",
+      "# Ambiguous status",
+    ].join("\n"))).toThrow("keys must not differ only by case");
+
+    expect(() => parseNote(
+      "notes/unclosed.md",
+      "---\ntitle: Never closed\n# Hidden body\n",
+    )).toThrow("missing closing delimiter");
+
+    expect(() => parseNote("notes/unsafe-number.md", [
+      "---",
+      "external_id: 9007199254740993",
+      "---",
+      "# Unsafe number",
+    ].join("\n"))).toThrow("Invalid YAML frontmatter in notes/unsafe-number.md");
+  });
+
+  test("accepts empty and comment-only frontmatter as an empty metadata object", () => {
+    const empty = parseNote("notes/empty.md", "---\n---\n# Empty\n");
+    const comment = parseNote(
+      "notes/comment.md",
+      "---\n# metadata intentionally empty\n---\n# Comment\n",
+    );
+    expect(empty.metadata).toEqual({});
+    expect(comment.metadata).toEqual({});
+  });
+
+  test("rejects non-JSON-like foreign metadata values and cycles", () => {
+    expect(metadataValueFromUnknown({ valid: ["one", 2, true, null] })).toEqual({
+      valid: ["one", 2, true, null],
+    });
+    expect(metadataValueFromUnknown({ invalid: Number.NaN })).toBeUndefined();
+    expect(metadataValueFromUnknown({ unsafe: Number.MAX_SAFE_INTEGER + 1 })).toBeUndefined();
+
+    const cyclic: { self?: unknown } = {};
+    cyclic.self = cyclic;
+    expect(metadataValueFromUnknown(cyclic)).toBeUndefined();
+
+    let getterRead = false;
+    const accessor = {};
+    Object.defineProperty(accessor, "secret", {
+      enumerable: true,
+      get: () => {
+        getterRead = true;
+        return "not data";
+      },
+    });
+    expect(metadataValueFromUnknown(accessor)).toBeUndefined();
+    expect(getterRead).toBe(false);
   });
 
   test("keeps source line count while masking non-prose", () => {

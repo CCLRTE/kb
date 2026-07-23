@@ -1,7 +1,7 @@
 {
   "name": "@cclrte/kb",
-  "version": "0.1.0",
-  "description": "A local-first Markdown knowledge-base CLI with auditable web capture and derived backlinks.",
+  "version": "0.2.0",
+  "description": "A simple Markdown knowledge base for coding agents with local search, auditable capture, and derived backlinks.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -20,6 +20,8 @@
     "obsidian",
     "web-clipper",
     "backlinks",
+    "semantic-search",
+    "agent-memory",
     "local-first"
   ],
   "exports": {
@@ -27,13 +29,65 @@
       "types": "./src/index.ts",
       "import": "./dist/index.js"
     },
+    "./browser-profiles": {
+      "types": "./src/clip/browser-profiles.ts",
+      "import": "./dist/clip/browser-profiles.js"
+    },
     "./capture": {
       "types": "./src/capture.ts",
       "import": "./dist/capture.js"
     },
+    "./clip/acquire": {
+      "types": "./src/clip/acquire.ts",
+      "import": "./dist/clip/acquire.js"
+    },
+    "./clip/args": {
+      "types": "./src/clip/args.ts",
+      "import": "./dist/clip/args.js"
+    },
+    "./clip/bounded-byte-buffer": {
+      "types": "./src/clip/bounded-byte-buffer.ts",
+      "import": "./dist/clip/bounded-byte-buffer.js"
+    },
+    "./clip/cli": {
+      "types": "./src/clip/cli.ts",
+      "import": "./dist/clip/cli.js"
+    },
+    "./clip/doctor": {
+      "types": "./src/clip/doctor.ts",
+      "import": "./dist/clip/doctor.js"
+    },
+    "./clip/network": {
+      "types": "./src/clip/network.ts",
+      "import": "./dist/clip/network.js"
+    },
+    "./clip/network-proxy": {
+      "types": "./src/clip/network-proxy.ts",
+      "import": "./dist/clip/network-proxy.js"
+    },
+    "./clip/persist": {
+      "types": "./src/clip/persist.ts",
+      "import": "./dist/clip/persist.js"
+    },
+    "./clip/terminal": {
+      "types": "./src/clip/terminal.ts",
+      "import": "./dist/clip/terminal.js"
+    },
     "./graph": {
       "types": "./src/graph.ts",
       "import": "./dist/graph.js"
+    },
+    "./navigation": {
+      "types": "./src/navigation.ts",
+      "import": "./dist/navigation.js"
+    },
+    "./query": {
+      "types": "./src/query.ts",
+      "import": "./dist/query.js"
+    },
+    "./semantic": {
+      "types": "./src/semantic.ts",
+      "import": "./dist/semantic.js"
     }
   },
   "bin": {
@@ -49,6 +103,7 @@
     "src/clip/args.ts",
     "src/clip/assets.ts",
     "src/clip/bounded-byte-buffer.ts",
+    "src/clip/browser-profiles.ts",
     "src/clip/capture.ts",
     "src/clip/cli.ts",
     "src/clip/cookies.ts",
@@ -66,12 +121,16 @@
     "src/graph.ts",
     "src/index.ts",
     "src/init.ts",
+    "src/navigation.ts",
+    "src/query.ts",
+    "src/semantic.ts",
     "src/vault.ts",
+    "skills",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "bun -e 'await (await import(\"node:fs/promises\")).rm(\"./dist\", { recursive: true, force: true })' && bun build ./src/index.ts ./src/capture.ts ./src/graph.ts ./src/cli.ts ./src/clip/defuddle-worker.ts --outdir ./dist --root ./src --target bun --format esm --splitting --packages external",
+    "build": "bun -e 'await (await import(\"node:fs/promises\")).rm(\"./dist\", { recursive: true, force: true })' && bun build ./src/index.ts ./src/clip/browser-profiles.ts ./src/capture.ts ./src/clip/acquire.ts ./src/clip/args.ts ./src/clip/bounded-byte-buffer.ts ./src/clip/cli.ts ./src/clip/doctor.ts ./src/clip/network.ts ./src/clip/network-proxy.ts ./src/clip/persist.ts ./src/clip/terminal.ts ./src/graph.ts ./src/navigation.ts ./src/query.ts ./src/semantic.ts ./src/cli.ts ./src/clip/defuddle-worker.ts --outdir ./dist --root ./src --target bun --format esm --splitting --packages external",
     "typecheck": "tsc --noEmit",
     "test": "bun test ./src",
     "test:package": "bun run ./scripts/package-smoke.ts",
@@ -80,8 +139,10 @@
   },
   "dependencies": {
     "@steipete/sweet-cookie": "git+https://github.com/CCLRTE/sweet-cookie.git#81b63e11677bf73e2660493a48228d11812c5ee0",
+    "@tobilu/qmd": "2.5.3",
     "agent-browser": "0.32.3",
-    "defuddle": "0.19.1"
+    "defuddle": "0.19.1",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",

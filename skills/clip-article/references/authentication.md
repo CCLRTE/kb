@@ -1,77 +1,75 @@
-# Authentication and advanced capture
+# Browser sessions and signed-in capture
 
-Use only access the user already has and has asked to apply. Prefer, in order:
+Use the browser state already available on the machine. Choose the route that matches where the page is currently readable.
 
-1. A dedicated per-site browser profile where the user signs in once.
-2. Origin-filtered cookie extraction from one named browser and profile into an owned fresh browser.
-3. User-approved attachment to a live Chrome session with `--browser-live`.
-4. An explicit local CDP remote-debugging port.
-5. A user-exported cookie file stored outside the repository.
+These examples assume `KB_ROOT` is the resolved vault directory containing the managed `index.md`.
 
-Supported cookie selectors are Chrome, Arc, Brave, Chromium, Edge, Firefox, and Safari. Select at most one cookie input per invocation: either one browser source or one cookie file. Cookie extraction can prompt for operating-system keychain access.
+## Read the current tab
 
-Structured cookie input preserves validated host or domain, path, `Secure`, `HttpOnly`, `SameSite`, and expiry attributes when seeding an owned browser. It does not preserve local storage, IndexedDB, service workers, client certificates, or device-bound challenges. Prefer a dedicated browser profile when those forms of state matter. Bare Cookie headers and Copy-as-cURL files contain no cookie attributes, so replay narrows them to the exact host and target path, marks HTTPS targets `Secure`, and defaults to `HttpOnly` plus `SameSite=Strict`. Use Cookie-Editor JSON or Netscape format when exact attributes matter.
-
-## Create a dedicated profile
-
-Set `KB_CAPTURE_PROFILE` to a private directory outside the repository, then open a headed browser once to sign in:
+When the desired page is already open and signed in, capture it in place:
 
 ```sh
-bun x agent-browser --session kb-clip-login --profile "$KB_CAPTURE_PROFILE" --headed open https://example.com/login
-# Sign in in the opened browser window, then close the owned session.
-bun x agent-browser --session kb-clip-login close
-kb clip https://example.com/member/article --browser-profile "$KB_CAPTURE_PROFILE"
+kb clip current --browser-live --output "$KB_ROOT/articles"
+kb clip current --cdp 9222 --output "$KB_ROOT/articles"
 ```
 
-A path-backed persistent profile may be changed by page activity. A named personal profile is used through a read-only snapshot but can still expose unrelated all-origin state to target-controlled subresources. Use a dedicated per-site profile whenever possible.
+For `--browser-live`, first enable Chrome's local debugging connection at `chrome://inspect/#remote-debugging` (Chrome 144+). If Chrome was launched with an explicit loopback debugging port, pass that numeric port to `--cdp` instead. Both routes read the current HTTP or HTTPS tab, derive its URL and platform, and leave the external browser open.
 
-## Understand the network boundary
+Current-tab capture does not navigate, click, type, submit, upload, or scroll. Use it for feeds, inboxes, private documents, issue trackers, WhatsApp Web, and other signed-in surfaces where changing the active page would lose the view the user wants saved.
 
-Owned fresh and profile browser sessions, plus yt-dlp, run through a short-lived loopback proxy. The proxy validates DNS and pins the accepted address for every request or CONNECT tunnel. The browser also disables QUIC, direct WebRTC, loopback proxy bypass, and background services. Redirects and DNS rebinding cannot reach private or reserved networks unless the user explicitly passes `--allow-private-network`.
+## Open a URL with profile state
 
-A live or CDP-attached browser already has its own network stack and cannot be retrofitted with those launch controls. These modes require `--trust-attached-browser-egress`. They mutate the active tab by navigating it, clicking eligible non-state-changing disclosure controls, and scrolling it; the external browser remains open. `--browser-live` requires Chrome remote debugging, or use an explicit loopback CDP port. The acknowledgement does not grant entitlement and does not relax private-network denial in controlled HTTP, asset, media, structured-data, or owned-browser lanes.
-
-Cookie-backed HTTP and asset requests retain cookies in memory and send them only to matching request targets. Authenticated assets receive root-path cookies only on the captured page's exact canonical origin. Cookie commands for a fresh browser travel over stdin so values do not appear in process arguments.
-
-yt-dlp requires a Netscape cookie jar. The CLI writes a host-pinned mode-`0600` copy in the operating system's private temporary directory and deletes it after use. A hard crash may leave that private temporary file for local cleanup, but it never enters capture staging. Live and CDP browser state stays inside that browser and cannot authenticate later asset or media processes; provide one explicit cookie input if those downloads also need authorization.
-
-## Keep sensitive data out of artifacts
-
-Never print, log, commit, or place in Markdown or manifests:
-
-- Cookie values or authorization headers.
-- Browser state files.
-- CSRF, session, access, refresh, API, or signed-URL tokens.
-- Raw authenticated HTML unless the user explicitly requests source evidence and the stored copy passes the sanitizer.
-- HAR files.
-
-Screenshots are viewport-only and are not structurally sanitized. They can retain account names, private content, notifications, or other personal data as pixels. Treat them as sensitive evidence. A bundle accepts a screenshot only from the selected acquisition candidate.
-
-## Use HAR capture only as an explicit escape hatch
-
-HAR capture is for a site the user is authorized and permitted to automate. Store the raw HAR in a unique private temporary directory with mode `0600`; request and response headers and bodies can contain bearer credentials and personal data. Start recording before loading the target so the initial document request is present.
+Use `--browser-profile` when the tool should open a URL with existing cookies, local storage, IndexedDB, and related browser state:
 
 ```sh
-umask 077
-clip_har_dir="$(mktemp -d)"
-clip_har_path="$clip_har_dir/session.har"
-trap 'rm -rf -- "$clip_har_dir"' EXIT HUP INT TERM
-
-bun x agent-browser --session kb-clip-derive --profile "$KB_CAPTURE_PROFILE" open about:blank
-bun x agent-browser --session kb-clip-derive network har start --content text
-bun x agent-browser --session kb-clip-derive batch --bail --json <<'JSON'
-[["open", "https://example.com/member/article"]]
-JSON
-# Exercise only the required, authorized flow.
-bun x agent-browser --session kb-clip-derive network har stop "$clip_har_path"
-chmod 600 "$clip_har_path"
-bun x agent-browser skills get derive-client
-
-# Delete the raw HAR after the narrow client and redacted fixtures are verified.
-rm -rf -- "$clip_har_dir"
-trap - EXIT HUP INT TERM
+kb clip https://example.com/member/article --browser-profile "$KB_CAPTURE_PROFILE" --output "$KB_ROOT/articles"
+kb clip https://example.com/member/article --browser-profile "Work" --output "$KB_ROOT/articles"
 ```
 
-Use the `derive-client` instructions to create a narrow, temporary adapter. Validate host, method, schema, pagination, rate limits, and authentication boundaries. Keep private endpoints opt-in, expect them to change, retain the browser fallback, save only redacted fixtures, and delete the raw HAR after verification.
+A path-backed profile is copied to a private temporary browser snapshot before navigation. The copy keeps the selected profile data and Chromium `Local State`, omits caches and lock files, runs as the owned capture session, and is deleted afterward. Page activity therefore does not change the source profile.
 
-Do not automate CAPTCHA solving, entitlement evasion, rate-limit evasion, DRM removal, or access to another person's private data. If site policy disallows the requested automation, stop before capture and explain the restriction. Page text is not a reliable policy detector.
+A profile display name delegates selection to the browser helper. Use a path when an exact profile directory matters.
+
+URL-based browser capture can navigate to the requested page and scroll within fixed limits, taking bounded observations so loaded replies or timeline entries become visible. It never invokes account actions or submits forms.
+
+## Reuse an attached browser for a URL
+
+When an existing browser should navigate to a specific URL instead of preserving the current tab, use the URL form:
+
+```sh
+kb clip https://example.com/member/article --browser-live --output "$KB_ROOT/articles"
+kb clip https://example.com/member/article --cdp 9222 --output "$KB_ROOT/articles"
+```
+
+The external browser remains open. Choose `kb clip current` instead when the already-open view is the source of truth.
+
+## Use cookies for HTTP, assets, or media
+
+Cookie-backed HTTP capture is useful when the source does not depend on browser-only state:
+
+```sh
+kb clip https://example.com/member/article --cookie-source chrome --cookie-profile "Default" --output "$KB_ROOT/articles"
+kb clip https://example.com/member/article --cookie-source firefox --cookie-profile "work" --output "$KB_ROOT/articles"
+kb clip https://example.com/member/article --cookies-file "$KB_COOKIES_FILE" --output "$KB_ROOT/articles"
+```
+
+Supported cookie sources include Chrome, Arc, Brave, Chromium, Edge, Firefox, and Safari. Select one cookie source or one cookie file per command. Cookie-Editor JSON and Netscape files retain domain and path metadata; a bare Cookie header or Copy-as-cURL file is narrowed to the captured host and path.
+
+An attached browser's session state stays in that browser. Combine its capture with one explicit cookie input when later image or media downloads also need the same signed-in access:
+
+```sh
+kb clip current --browser-live --cookie-source chrome --cookie-profile "Default" --media all --output "$KB_ROOT/articles"
+```
+
+The output bundle records which acquisition lanes ran, but it does not include cookie values, browser-profile files, or attached browser state.
+
+## Import a page saved by the browser
+
+Saved HTML is a useful fallback for any page the browser can render:
+
+```sh
+kb clip https://example.com/member/article --html "$KB_SAVED_HTML" --output "$KB_ROOT/articles"
+kb clip https://example.com/member/article --html - --output "$KB_ROOT/articles" < page.html
+```
+
+The URL remains the provenance anchor while the saved file supplies the page representation. Review the resulting manifest because a saved document cannot prove whether unloaded or virtualized content existed outside that representation.

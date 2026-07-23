@@ -36,6 +36,8 @@ describe("platform and canonical URL detection", () => {
     ["https://mobile.twitter.com/user/status/1", "x"],
     ["https://redd.it/abc123", "reddit"],
     ["https://fb.com/story.php?id=1", "facebook"],
+    ["https://github.com/CCLRTE/kb/issues/42", "github"],
+    ["https://meta.discourse.org/t/a-topic/12345", "discourse"],
     ["https://example.com/article", "generic"],
   ];
   test.each(platformCases)("classifies %s", (url, platform) => expect(detectPlatform(new URL(url))).toBe(platform));
@@ -87,6 +89,14 @@ describe("Defuddle extraction", () => {
       content: '<article><div class="linkedin comments"><div class="comment">one</div></div></article>',
       extractorType: "linkedin",
     }, "linkedin")).toBe(1);
+    expect(countDefuddleConversationItems({
+      content: '<article><div class="github comments"><div class="comment">one</div><div class="comment">two</div></div></article>',
+      extractorType: "github",
+    }, "github")).toBe(2);
+    expect(countDefuddleConversationItems({
+      content: '<article><div class="discourse comments"><div class="comment">one</div></div></article>',
+      extractorType: "discourse",
+    }, "discourse")).toBe(1);
     expect(countDefuddleConversationItems({
       content: "<article><h2>Comments</h2><hr><p>ordinary prose</p></article>",
       extractorType: "generic",

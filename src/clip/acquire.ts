@@ -14,7 +14,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 
 import { getCookies, type BrowserName, type GetCookiesOptions } from "@steipete/sweet-cookie";
 
-import type { CaptureArguments } from "./args.js";
+import { captureUrl, type CaptureArguments } from "./args.js";
 import { BoundedByteBuffer } from "./bounded-byte-buffer.js";
 import {
   filterCookieProviderResult,
@@ -26,10 +26,11 @@ import { assertSafeNetworkUrl, decodeBytes, safeFetch } from "./network.js";
 import { startNetworkProxy, type LocalNetworkProxy } from "./network-proxy.js";
 import { classifyPlatformUrl } from "./platforms.js";
 import { findKbPackageRoot, resolvePackageDirectory } from "./package-root.js";
+import { sanitizeArtifactUrl } from "./persist.js";
 
 const agentBrowserBinDirectory = join(resolvePackageDirectory("agent-browser"), "bin");
 
-function agentBrowserCommand(): readonly string[] {
+export function agentBrowserCommand(): readonly string[] {
   const platform = process.platform === "win32" ? "win32" : process.platform;
   const extension = process.platform === "win32" ? ".exe" : "";
   const native = join(agentBrowserBinDirectory, `agent-browser-${platform}-${process.arch}${extension}`);
@@ -312,99 +313,203 @@ function shouldExpand(url: URL, options: CaptureArguments, method: AcquisitionMe
     || platform === "instagram"
     || platform === "tiktok"
     || platform === "threads"
+    || platform === "whatsapp"
     || platform === "youtube"
+    || platform === "github"
+    || platform === "discourse"
     || platform === "substack";
 }
 
-const safeExpansionControlPattern = /^(?:(?:show|view|load|see|read)\s+(?:(?:all|more|additional|previous|next|older|newer|this|\d+(?:[.,]\d+)?[km]?)\s+){0,3}(?:repl(?:y|ies)|comments?|thread)|(?:show|view|load|see|read)\s+more)$/i;
-
-export type BrowserExpansionLimits = {
-  readonly maxScrolls: number;
-  readonly maxVisitedElements: number;
-  readonly maxClicks: number;
+export type RenderedTextSnapshotMerge = {
+  readonly content: string;
+  readonly truncated: boolean;
+  readonly observedSnapshots: number;
+  /** Content lines contributed after the first non-empty snapshot. */
+  readonly addedLines: number;
 };
 
-export type BrowserExpansionTelemetry = {
-  readonly visitedElements: number;
-  readonly eligibleControls: number;
-  readonly clicks: number;
-  readonly clickFailures: number;
-  readonly inspectionFailures: number;
-  readonly scrolls: number;
-  readonly elementBudgetReached: boolean;
-  readonly clickBudgetReached: boolean;
-  readonly scrollBudgetReached: boolean;
-};
+function renderedTextLines(snapshot: string): readonly string[] {
+  const lines = snapshot.replace(/\r\n?/g, "\n").split("\n");
+  let start = 0;
+  while (start < lines.length && lines[start]?.trim() === "") start += 1;
+  let end = lines.length;
+  while (end > start && lines[end - 1]?.trim() === "") end -= 1;
+  return lines.slice(start, end);
+}
 
-/** Derive conservative browser-work budgets from the requested conversation size. */
-export function browserExpansionLimits(maxItems: number): BrowserExpansionLimits {
-  const boundedItems = Number.isSafeInteger(maxItems) ? Math.max(1, Math.min(maxItems, 10_000)) : 500;
+/** Find the longest suffix of `source` that is also a prefix of `prefix`. */
+function suffixPrefixOverlap(source: readonly string[], prefix: readonly string[]): number {
+  if (source.length === 0 || prefix.length === 0) return 0;
+
+  // KMP keeps snapshot merging linear even for long feeds full of repeated rows.
+  const fallback = new Array<number>(prefix.length).fill(0);
+  for (let index = 1; index < prefix.length; index += 1) {
+    let matched = fallback[index - 1] ?? 0;
+    while (matched > 0 && prefix[index] !== prefix[matched]) {
+      matched = fallback[matched - 1] ?? 0;
+    }
+    if (prefix[index] === prefix[matched]) matched += 1;
+    fallback[index] = matched;
+  }
+
+  let matched = 0;
+  for (let index = 0; index < source.length; index += 1) {
+    while (matched > 0 && source[index] !== prefix[matched]) {
+      matched = fallback[matched - 1] ?? 0;
+    }
+    if (source[index] === prefix[matched]) matched += 1;
+    // A complete match before the end is not a suffix. Continue with its
+    // longest proper border so a later match can reach the final source line.
+    if (matched === prefix.length && index < source.length - 1) {
+      matched = fallback[matched - 1] ?? 0;
+    }
+  }
+  return matched;
+}
+
+function truncateUtf8(value: string, maxBytes: number): { readonly content: string; readonly truncated: boolean } {
+  const encoded = new TextEncoder().encode(value);
+  if (encoded.byteLength <= maxBytes) return { content: value, truncated: false };
+
+  let end = maxBytes;
+  // If the byte just outside the prefix is a UTF-8 continuation byte, the
+  // prefix ended part-way through a code point. Drop that incomplete point.
+  while (end > 0 && (encoded[end] ?? 0) >>> 6 === 0b10) end -= 1;
   return {
-    maxScrolls: Math.max(3, Math.min(40, Math.ceil(boundedItems / 20))),
-    maxVisitedElements: Math.max(2_048, Math.min(50_000, boundedItems * 32)),
-    maxClicks: Math.max(16, Math.min(256, Math.ceil(boundedItems / 2))),
+    content: new TextDecoder("utf-8", { fatal: true }).decode(encoded.subarray(0, end)),
+    truncated: true,
   };
 }
 
-/** Only non-mutating disclosure controls are eligible for automatic thread expansion. */
-export function isSafeExpansionControlLabel(value: string): boolean {
-  return value.length < 80 && safeExpansionControlPattern.test(value.replace(/\s+/g, " ").trim());
+/**
+ * Merge consecutive rendered-text observations from one page.
+ *
+ * Static leading chrome is removed from later observations, while a suffix /
+ * prefix overlap preserves virtualized rows that disappeared during scrolling.
+ */
+export function mergeRenderedTextSnapshots(
+  snapshots: readonly string[],
+  maxBytes: number,
+): RenderedTextSnapshotMerge {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) {
+    throw new RangeError("rendered text byte limit must be a non-negative safe integer");
+  }
+
+  const merged: string[] = [];
+  let hasBaseline = false;
+  let addedLines = 0;
+  for (const snapshot of snapshots) {
+    const lines = renderedTextLines(snapshot);
+    if (lines.length === 0) continue;
+    if (!hasBaseline) {
+      for (const line of lines) merged.push(line);
+      hasBaseline = true;
+      continue;
+    }
+
+    let commonPrefix = 0;
+    const prefixLimit = Math.min(merged.length, lines.length);
+    while (commonPrefix < prefixLimit && merged[commonPrefix] === lines[commonPrefix]) {
+      commonPrefix += 1;
+    }
+    const remaining = lines.slice(commonPrefix);
+    if (remaining.length === 0) continue;
+
+    const overlap = suffixPrefixOverlap(merged, remaining);
+    const additions = remaining.slice(overlap);
+    if (additions.length === 0) continue;
+    if (commonPrefix === 0 && overlap === 0 && merged.at(-1) !== "") merged.push("");
+    for (const line of additions) merged.push(line);
+    addedLines += additions.length;
+  }
+
+  const bounded = truncateUtf8(merged.join("\n"), maxBytes);
+  return {
+    ...bounded,
+    observedSnapshots: snapshots.length,
+    addedLines,
+  };
 }
 
-/** Build the bounded in-page disclosure/scroll program used by rendered thread capture. */
+export type BrowserExpansionLimits = {
+  readonly maxScrolls: number;
+  /** Total UTF-8 bytes retained across every in-pass rendered-text observation. */
+  readonly maxObservedTextBytes: number;
+};
+
+export type BrowserExpansionTelemetry = {
+  readonly scrolls: number;
+  readonly scrollBudgetReached: boolean;
+  readonly renderedTextSnapshots: readonly string[];
+  readonly renderedTextObservationTruncated: boolean;
+};
+
+/** Derive conservative browser-work budgets from the requested conversation size. */
+export function browserExpansionLimits(
+  maxItems: number,
+  maxObservedTextBytes = 4 * 1024 * 1024,
+): BrowserExpansionLimits {
+  const boundedItems = Number.isSafeInteger(maxItems) ? Math.max(1, Math.min(maxItems, 10_000)) : 500;
+  const boundedObservationBytes = Number.isSafeInteger(maxObservedTextBytes) && maxObservedTextBytes > 0
+    ? Math.min(maxObservedTextBytes, 4 * 1024 * 1024)
+    : 4 * 1024 * 1024;
+  return {
+    maxScrolls: Math.max(3, Math.min(40, Math.ceil(boundedItems / 20))),
+    maxObservedTextBytes: boundedObservationBytes,
+  };
+}
+
+/** Build the bounded, ingestion-only scroll/observation program used by rendered thread capture. */
 export function browserExpansionScript(limits: BrowserExpansionLimits): string {
   return `(async () => {
-    const patterns = new RegExp(${JSON.stringify(safeExpansionControlPattern.source)}, 'i');
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-    const clickedControls = new WeakSet();
-    let visitedElements = 0;
-    let eligibleControls = 0;
-    let clicks = 0;
-    let clickFailures = 0;
-    let inspectionFailures = 0;
+    const renderedTextSnapshots = [];
+    let observedTextBytes = 0;
+    let renderedTextObservationTruncated = false;
     let stable = 0;
     let previousHeight = 0;
     let scrolls = 0;
     let settled = false;
-    let elementBudgetReached = false;
-    let clickBudgetReached = false;
-    for (let pass = 0; pass < ${limits.maxScrolls}; pass += 1) {
-      if (!elementBudgetReached && !clickBudgetReached) {
-        const walker = document.createTreeWalker(document.documentElement, 1);
-        while (visitedElements < ${limits.maxVisitedElements}) {
-          const control = walker.nextNode();
-          if (control === null) break;
-          visitedElements += 1;
-          if (clickedControls.has(control)) continue;
-          try {
-            const name = (control.localName || '').toLowerCase();
-            if (name !== 'button' && name !== 'summary' && control.getAttribute('role') !== 'button') continue;
-            const text = (control.textContent || control.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim();
-            if (!text || text.length >= 80 || !patterns.test(text)) continue;
-            eligibleControls += 1;
-            const rect = control.getBoundingClientRect();
-            if (rect.width <= 0 || rect.height <= 0) continue;
-            // Mark before dispatch: a throwing handler must not be retried on every pass.
-            clickedControls.add(control);
-            clicks += 1;
-            try {
-              control.click();
-            } catch {
-              clickFailures += 1;
-            }
-            if (clicks >= ${limits.maxClicks}) {
-              clickBudgetReached = true;
-              break;
-            }
-          } catch {
-            inspectionFailures += 1;
+    const boundedRenderedText = (value, maxBytes) => {
+      let bytes = 0;
+      let end = 0;
+      while (end < value.length) {
+        const first = value.charCodeAt(end);
+        let width = 3;
+        let codeUnits = 1;
+        if (first <= 0x7f) width = 1;
+        else if (first <= 0x7ff) width = 2;
+        else if (first >= 0xd800 && first <= 0xdbff) {
+          const second = value.charCodeAt(end + 1);
+          if (second >= 0xdc00 && second <= 0xdfff) {
+            width = 4;
+            codeUnits = 2;
           }
         }
-        if (visitedElements >= ${limits.maxVisitedElements}) elementBudgetReached = true;
+        if (bytes + width > maxBytes) break;
+        bytes += width;
+        end += codeUnits;
       }
+      return { text: value.slice(0, end), bytes, truncated: end < value.length };
+    };
+    for (let pass = 0; pass < ${limits.maxScrolls}; pass += 1) {
       window.scrollTo(0, document.documentElement.scrollHeight);
       scrolls += 1;
       await sleep(700);
+      try {
+        const root = document.body || document.documentElement;
+        const renderedValue = root ? root.innerText : '';
+        const rendered = typeof renderedValue === 'string' ? renderedValue : '';
+        const remainingBytes = ${limits.maxObservedTextBytes} - observedTextBytes;
+        const remainingPasses = ${limits.maxScrolls} - pass;
+        const passBytes = Math.max(0, Math.ceil(remainingBytes / remainingPasses));
+        const observation = boundedRenderedText(rendered, passBytes);
+        if (observation.text.trim() !== '') renderedTextSnapshots.push(observation.text);
+        observedTextBytes += observation.bytes;
+        if (observation.truncated) renderedTextObservationTruncated = true;
+      } catch {
+        renderedTextObservationTruncated = true;
+      }
       const height = document.documentElement.scrollHeight;
       stable = height === previousHeight ? stable + 1 : 0;
       previousHeight = height;
@@ -415,15 +520,10 @@ export function browserExpansionScript(limits: BrowserExpansionLimits): string {
     }
     window.scrollTo(0, 0);
     return {
-      visitedElements,
-      eligibleControls,
-      clicks,
-      clickFailures,
-      inspectionFailures,
       scrolls,
-      elementBudgetReached,
-      clickBudgetReached,
-      scrollBudgetReached: !settled && scrolls >= ${limits.maxScrolls}
+      scrollBudgetReached: !settled && scrolls >= ${limits.maxScrolls},
+      renderedTextSnapshots,
+      renderedTextObservationTruncated
     };
   })()`;
 }
@@ -437,39 +537,30 @@ export function readBrowserExpansionTelemetry(
   limits: BrowserExpansionLimits,
 ): BrowserExpansionTelemetry | null {
   if (!isRecord(value)) return null;
-  const visitedElements = nonNegativeInteger(value.visitedElements);
-  const eligibleControls = nonNegativeInteger(value.eligibleControls);
-  const clicks = nonNegativeInteger(value.clicks);
-  const clickFailures = nonNegativeInteger(value.clickFailures);
-  const inspectionFailures = nonNegativeInteger(value.inspectionFailures);
   const scrolls = nonNegativeInteger(value.scrolls);
+  if (!Array.isArray(value.renderedTextSnapshots)) return null;
+  if (value.renderedTextSnapshots.length > limits.maxScrolls) return null;
+  const renderedTextSnapshots: string[] = [];
+  let observedTextBytes = 0;
+  for (const snapshot of value.renderedTextSnapshots) {
+    if (typeof snapshot !== "string") return null;
+    if (snapshot.length > limits.maxObservedTextBytes) return null;
+    observedTextBytes += new TextEncoder().encode(snapshot).byteLength;
+    if (observedTextBytes > limits.maxObservedTextBytes) return null;
+    renderedTextSnapshots.push(snapshot);
+  }
   if (
-    visitedElements === null
-    || eligibleControls === null
-    || clicks === null
-    || clickFailures === null
-    || inspectionFailures === null
-    || scrolls === null
-    || visitedElements > limits.maxVisitedElements
-    || eligibleControls > visitedElements
-    || clicks > limits.maxClicks
-    || clickFailures > clicks
-    || inspectionFailures > visitedElements
+    scrolls === null
     || scrolls > limits.maxScrolls
-    || typeof value.elementBudgetReached !== "boolean"
-    || typeof value.clickBudgetReached !== "boolean"
+    || renderedTextSnapshots.length > scrolls
     || typeof value.scrollBudgetReached !== "boolean"
+    || typeof value.renderedTextObservationTruncated !== "boolean"
   ) return null;
   return {
-    visitedElements,
-    eligibleControls,
-    clicks,
-    clickFailures,
-    inspectionFailures,
     scrolls,
-    elementBudgetReached: value.elementBudgetReached,
-    clickBudgetReached: value.clickBudgetReached,
     scrollBudgetReached: value.scrollBudgetReached,
+    renderedTextSnapshots,
+    renderedTextObservationTruncated: value.renderedTextObservationTruncated,
   };
 }
 
@@ -478,25 +569,17 @@ export function browserExpansionWarnings(
   telemetry: BrowserExpansionTelemetry,
   limits: BrowserExpansionLimits,
 ): readonly string[] {
-  const warnings: string[] = [];
-  if (telemetry.elementBudgetReached) {
-    warnings.push(
-      `Browser expansion reached its ${limits.maxVisitedElements}-element inspection budget; additional disclosure controls may remain unexpanded.`,
-    );
-  }
-  if (telemetry.clickBudgetReached) {
-    warnings.push(
-      `Browser expansion reached its ${limits.maxClicks}-click budget; additional disclosure controls may remain unexpanded.`,
-    );
-  }
+  const warnings = [
+    "Browser capture left disclosure controls untouched; collapsed content may remain unavailable.",
+  ];
   if (telemetry.scrollBudgetReached) {
     warnings.push(
-      `Browser expansion reached its ${limits.maxScrolls}-scroll budget before the document stabilized; lazy content may remain unloaded.`,
+      `Browser capture reached its ${limits.maxScrolls}-scroll budget before the document stabilized; lazy content may remain unloaded.`,
     );
   }
-  if (telemetry.clickFailures > 0 || telemetry.inspectionFailures > 0) {
+  if (telemetry.renderedTextObservationTruncated) {
     warnings.push(
-      `Browser expansion skipped ${telemetry.clickFailures} failed click attempt(s) and ${telemetry.inspectionFailures} unreadable control(s).`,
+      `Rendered-text observations reached their ${limits.maxObservedTextBytes}-byte capture budget; some virtualized content may be missing.`,
     );
   }
   return warnings;
@@ -657,10 +740,11 @@ export async function seedOwnedBrowserCookies(
 ): Promise<readonly string[]> {
   const selected = options.cookieSources.length > 0 || options.cookiesFile !== undefined;
   if (!selected) return [];
-  const result = await (dependencies.readCookies ?? acquireCookieRecords)(options, options.url);
+  const target = captureUrl(options);
+  const result = await (dependencies.readCookies ?? acquireCookieRecords)(options, target);
   await (dependencies.runBatch ?? runAgentBrowserBatch)(
     globalArgs,
-    browserCookieCommands(result.cookies, options.url),
+    browserCookieCommands(result.cookies, target),
     commandOptions,
   );
   return [
@@ -689,18 +773,33 @@ export function browserProxyArguments(
   return ["--proxy", proxyUrl, "--args", chromiumArguments];
 }
 
+export type BrowserAcquisitionDependencies = {
+  readonly run?: typeof runAgentBrowser;
+  readonly runBatch?: typeof runAgentBrowserBatch;
+  readonly sleep?: (milliseconds: number) => Promise<void>;
+  readonly assertNetworkUrl?: typeof assertSafeNetworkUrl;
+};
+
 export async function acquireBrowser(
   options: CaptureArguments,
   temporaryDirectory: string,
   useDiscoveredProfile = false,
+  dependencies: BrowserAcquisitionDependencies = {},
 ): Promise<AcquiredPage> {
-  if ((options.cdp !== undefined || options.browserLive) && !options.trustAttachedBrowserEgress) {
-    throw new Error(
-      "Attached browser sessions cannot be forced through the private-network filter; " +
-      "rerun with --trust-attached-browser-egress only when you explicitly trust that live browser's network access.",
-    );
+  if (options.currentTab && (!options.browserLive && options.cdp === undefined)) {
+    throw new Error("current-tab capture requires --browser-live or --cdp");
   }
-  await assertSafeNetworkUrl(options.url, options.allowPrivateNetwork, options.timeoutMs);
+  if (options.currentTab && options.browserProfile !== undefined) {
+    throw new Error("current-tab capture cannot use a browser profile; attach with --browser-live or --cdp");
+  }
+  const assertNetworkUrl = dependencies.assertNetworkUrl ?? assertSafeNetworkUrl;
+  const requestedUrl = options.currentTab ? null : captureUrl(options);
+  if (requestedUrl !== null) {
+    await assertNetworkUrl(requestedUrl, options.allowPrivateNetwork, options.timeoutMs);
+  }
+  const runBrowser = dependencies.run ?? runAgentBrowser;
+  const runBrowserBatch = dependencies.runBatch ?? runAgentBrowserBatch;
+  const sleep = dependencies.sleep ?? ((milliseconds: number) => Bun.sleep(milliseconds));
   const warnings: string[] = [];
   const persistentProfilePath = assertSafePersistentProfile(options);
   const ownedProfile = options.browserProfileOwnership === "owned";
@@ -758,11 +857,13 @@ export async function acquireBrowser(
         });
         globalArgs.push(...browserProxyArguments(networkProxy.url, options.browserProfileDirectory));
       }
-    try {
-      await runAgentBrowser(globalArgs, ["open", "about:blank"], commandOptions);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      warnings.push(`Browser startup did not settle cleanly; attempted to use the isolated session: ${message}`);
+    if (!options.currentTab) {
+      try {
+        await runBrowser(globalArgs, ["open", "about:blank"], commandOptions);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        warnings.push(`Browser startup did not settle cleanly; attempted to use the isolated session: ${message}`);
+      }
     }
     if (ownsBrowser && (method === "browser-fresh" || ownedProfile)) {
       warnings.push(...await seedOwnedBrowserCookies(options, globalArgs, commandOptions));
@@ -770,45 +871,56 @@ export async function acquireBrowser(
       warnings.push("Explicit cookie input remained a separate HTTP/media lane and was not imported into the selected profile or attached browser.");
     }
     if (!ownsBrowser) {
-      warnings.push("Attached browser capture navigated, clicked eligible disclosure controls, and scrolled the active tab; the external browser itself was left open.");
+      warnings.push(options.currentTab
+        ? "Captured the current attached tab without navigation or interaction; the external browser itself was left open."
+        : "Attached browser capture navigated and scrolled the active tab; the external browser itself was left open.");
     }
     let beforeNavigation: URL | null = null;
     try {
-      beforeNavigation = readBrowserUrl(await runAgentBrowser(globalArgs, ["get", "url"], commandOptions));
+      beforeNavigation = readBrowserUrl(await runBrowser(globalArgs, ["get", "url"], commandOptions));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       warnings.push(`Could not establish a pre-navigation browser URL: ${message}`);
     }
     let navigationCommandSucceeded = false;
-    try {
-      // The requested URL can contain one-time query credentials. Deliver the
-      // native CDP navigation command over batch stdin so it never appears in
-      // a process listing and page JavaScript cannot monkeypatch or race it.
-      await runAgentBrowserBatch(
-        globalArgs,
-        [["open", options.url.href]],
-        commandOptions,
-      );
-      navigationCommandSucceeded = true;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      warnings.push(`Browser navigation command ended during page transition: ${message}`);
+    if (!options.currentTab) {
+      try {
+        // The requested URL can contain one-time query credentials. Deliver the
+        // native CDP navigation command over batch stdin so it never appears in
+        // a process listing and page JavaScript cannot monkeypatch or race it.
+        await runBrowserBatch(
+          globalArgs,
+          [["open", captureUrl(options).href]],
+          commandOptions,
+        );
+        navigationCommandSucceeded = true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        warnings.push(`Browser navigation command ended during page transition: ${message}`);
+      }
+      await sleep(Math.min(5_000, Math.max(1_500, Math.floor(options.timeoutMs / 6))));
     }
-    await Bun.sleep(Math.min(5_000, Math.max(1_500, Math.floor(options.timeoutMs / 6))));
     let readable: ReturnType<typeof readBrowserContent>;
     try {
-      readable = readBrowserContent(await runAgentBrowser(globalArgs, ["read"], commandOptions));
+      readable = readBrowserContent(await runBrowser(globalArgs, ["read"], commandOptions));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       warnings.push(`Rendered readable text was unavailable; continuing with the bounded DOM: ${message}`);
       readable = {
         content: "",
-        finalUrl: readBrowserUrl(await runAgentBrowser(globalArgs, ["get", "url"], commandOptions)),
+        finalUrl: readBrowserUrl(await runBrowser(globalArgs, ["get", "url"], commandOptions)),
         truncated: false,
       };
     }
-    if (!browserNavigationReachedTarget(
-      options.url,
+    if (options.currentTab) {
+      if (readable.finalUrl.protocol !== "http:" && readable.finalUrl.protocol !== "https:") {
+        throw new Error("the current tab must have an HTTP or HTTPS URL");
+      }
+      if (beforeNavigation !== null && !browserExpansionStayedOnPage(beforeNavigation, readable.finalUrl)) {
+        throw new Error("the current tab changed pages while it was being read; retry on the intended page");
+      }
+    } else if (!browserNavigationReachedTarget(
+      captureUrl(options),
       beforeNavigation,
       readable.finalUrl,
       navigationCommandSucceeded,
@@ -816,10 +928,10 @@ export async function acquireBrowser(
       throw new Error("browser did not establish the requested navigation; refusing to capture a pre-existing tab");
     }
     let browserPageProvenanceIntact = true;
-    if (shouldExpand(readable.finalUrl, options, method)) {
-      const expansionLimits = browserExpansionLimits(options.maxItems);
+    if (!options.currentTab && shouldExpand(readable.finalUrl, options, method)) {
+      const expansionLimits = browserExpansionLimits(options.maxItems, options.maxHtmlBytes);
       try {
-        const expansion = await runAgentBrowser(globalArgs, ["eval", browserExpansionScript(expansionLimits)], {
+        const expansion = await runBrowser(globalArgs, ["eval", browserExpansionScript(expansionLimits)], {
           ...commandOptions,
           timeoutMs: Math.min(commandOptions.timeoutMs, 30_000),
         });
@@ -829,9 +941,29 @@ export async function acquireBrowser(
         } else {
           warnings.push(...browserExpansionWarnings(telemetry, expansionLimits));
         }
-        const expandedReadable = readBrowserContent(await runAgentBrowser(globalArgs, ["read"], commandOptions));
+        const expandedReadable = readBrowserContent(await runBrowser(globalArgs, ["read"], commandOptions));
         if (browserExpansionStayedOnPage(readable.finalUrl, expandedReadable.finalUrl)) {
-          readable = expandedReadable;
+          const merged = mergeRenderedTextSnapshots(
+            [
+              readable.content,
+              ...(telemetry?.renderedTextSnapshots ?? []),
+              expandedReadable.content,
+            ],
+            options.maxHtmlBytes,
+          );
+          readable = {
+            content: merged.content,
+            finalUrl: expandedReadable.finalUrl,
+            truncated: readable.truncated
+              || expandedReadable.truncated
+              || telemetry?.renderedTextObservationTruncated === true
+              || merged.truncated,
+          };
+          if (merged.addedLines > 0) {
+            warnings.push(
+              `Merged ${merged.addedLines} newly observed rendered-text line(s) with the pre-expansion snapshot so virtualized content remains available.`,
+            );
+          }
         } else {
           browserPageProvenanceIntact = false;
           warnings.push(
@@ -846,7 +978,9 @@ export async function acquireBrowser(
         );
       }
     }
-    await assertSafeNetworkUrl(readable.finalUrl, options.allowPrivateNetwork, options.timeoutMs);
+    if (!options.currentTab) {
+      await assertNetworkUrl(readable.finalUrl, options.allowPrivateNetwork, options.timeoutMs);
+    }
 
     const renderedText = readable.content;
     let body = renderedText;
@@ -856,7 +990,7 @@ export async function acquireBrowser(
     let browserTitle: string | undefined;
     if (browserPageProvenanceIntact) {
       try {
-        const capture = await runAgentBrowser(globalArgs, ["eval", browserCaptureScript()], commandOptions);
+        const capture = await runBrowser(globalArgs, ["eval", browserCaptureScript()], commandOptions);
         if (isRecord(capture.result)) {
           const html = capture.result.html;
           const title = capture.result.title;
@@ -895,19 +1029,19 @@ export async function acquireBrowser(
       warnings.push("Rendered DOM capture was skipped because post-expansion page provenance was not established.");
     }
     if (body.trim() === "") throw new Error("browser returned neither readable text nor a bounded rendered DOM");
-    if (contentTruncated) warnings.push("agent-browser truncated rendered text at its configured output boundary.");
+    if (readable.truncated) warnings.push("Rendered text was truncated at its configured output boundary.");
 
     let screenshotPath: string | undefined;
     if ((options.evidence === "screenshot" || options.evidence === "all") && browserPageProvenanceIntact) {
       const requestedScreenshotPath = join(temporaryDirectory, "page.png");
       screenshotPath = requestedScreenshotPath;
       try {
-        await runAgentBrowser(globalArgs, ["screenshot", requestedScreenshotPath], {
+        await runBrowser(globalArgs, ["screenshot", requestedScreenshotPath], {
           ...commandOptions,
           timeoutMs: options.timeoutMs,
           maxOutputBytes: 2 * 1024 * 1024,
         });
-        const afterScreenshot = readBrowserUrl(await runAgentBrowser(globalArgs, ["get", "url"], commandOptions));
+        const afterScreenshot = readBrowserUrl(await runBrowser(globalArgs, ["get", "url"], commandOptions));
         if (!browserExpansionStayedOnPage(readable.finalUrl, afterScreenshot)) {
           rmSync(requestedScreenshotPath, { force: true });
           warnings.push("Browser screenshot changed pages during capture and was discarded.");
@@ -928,7 +1062,9 @@ export async function acquireBrowser(
     return {
       body,
       contentType,
-      finalUrl: readable.finalUrl,
+      finalUrl: options.currentTab
+        ? new URL(sanitizeArtifactUrl(readable.finalUrl.href))
+        : readable.finalUrl,
       method,
       warnings,
       ...(browserTitle === undefined ? {} : { browserTitle }),
@@ -943,7 +1079,7 @@ export async function acquireBrowser(
       try {
         if (ownsBrowser) {
           try {
-            await runAgentBrowser(["--config", isolation.configPath, "--session", session], ["close"], {
+            await runBrowser(["--config", isolation.configPath, "--session", session], ["close"], {
               cwd: isolation.cwd,
               environment: isolation.environment,
               timeoutMs: 15_000,
@@ -966,7 +1102,7 @@ export async function acquireBrowser(
 }
 
 export async function acquireHttp(options: CaptureArguments): Promise<AcquiredPage> {
-  const response = await safeFetch(options.url, {
+  const response = await safeFetch(captureUrl(options), {
     timeoutMs: options.timeoutMs,
     maxBytes: options.maxHtmlBytes,
     allowPrivateNetwork: options.allowPrivateNetwork,
@@ -986,8 +1122,9 @@ export async function acquireCookieHttp(options: CaptureArguments): Promise<Acqu
   if (options.cookieSources.length === 0 && options.cookiesFile === undefined) {
     throw new Error("cookie capture requires --cookie-source or --cookies-file");
   }
-  const cookieResult = await acquireCookieHeader(options, options.url);
-  const response = await safeFetch(options.url, {
+  const target = captureUrl(options);
+  const cookieResult = await acquireCookieHeader(options, target);
+  const response = await safeFetch(target, {
     timeoutMs: options.timeoutMs,
     maxBytes: options.maxHtmlBytes,
     allowPrivateNetwork: options.allowPrivateNetwork,
@@ -1130,7 +1267,7 @@ export async function acquireFile(options: CaptureArguments): Promise<AcquiredPa
   return {
     body,
     contentType: "text/html; charset=utf-8",
-    finalUrl: options.url,
+    finalUrl: captureUrl(options),
     method: "file",
     warnings: options.htmlFile === "-" ? [] : [`Parsed rendered HTML from ${basename(options.htmlFile)}.`],
   };

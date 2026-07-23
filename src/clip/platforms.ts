@@ -26,7 +26,36 @@ export type PlatformUrl =
   | { readonly platform: "threads"; readonly href: string; readonly contentId: string | null }
   | { readonly platform: "whatsapp"; readonly href: string; readonly contentId: string | null }
   | { readonly platform: "youtube"; readonly href: string; readonly contentId: string | null }
+  | {
+      readonly platform: "github";
+      readonly href: string;
+      readonly owner: string;
+      readonly repository: string;
+      readonly contentKind: "issue" | "pull-request" | "discussion";
+      readonly contentId: string;
+    }
+  | { readonly platform: "discourse"; readonly href: string; readonly topicId: string }
   | { readonly platform: "generic"; readonly href: string; readonly host: string };
+
+export type Platform = PlatformUrl["platform"];
+
+export const classifiedPlatforms = [
+  "x",
+  "hacker-news",
+  "reddit",
+  "bluesky",
+  "substack",
+  "instagram",
+  "linkedin",
+  "facebook",
+  "tiktok",
+  "threads",
+  "whatsapp",
+  "youtube",
+  "github",
+  "discourse",
+  "generic",
+] as const satisfies readonly Platform[];
 
 export type CapturedPlatform = "x" | "hacker-news" | "reddit" | "bluesky";
 export type CapturedRole = "post" | "comment" | "quote";
@@ -449,6 +478,52 @@ export function classifyPlatformUrl(value: string | URL): PlatformUrl | null {
       ? (segments[0] ?? null)
       : url.searchParams.get("v") ?? (segments[0] === "shorts" || segments[0] === "live" ? (segments[1] ?? null) : null);
     return { platform: "youtube", href: canonicalWithoutFragment(url), contentId };
+  }
+
+  if (hostname === "github.com") {
+    const owner = segments[0];
+    const repository = segments[1];
+    const route = segments[2];
+    const contentId = segments[3];
+    const contentKind = route === "issues"
+      ? "issue"
+      : route === "pull"
+        ? "pull-request"
+        : route === "discussions"
+          ? "discussion"
+          : null;
+    if (
+      owner !== undefined
+      && repository !== undefined
+      && contentKind !== null
+      && contentId !== undefined
+      && /^[A-Za-z0-9_.-]+$/.test(owner)
+      && /^[A-Za-z0-9_.-]+$/.test(repository)
+      && /^\d+$/.test(contentId)
+    ) {
+      return {
+        platform: "github",
+        href: canonicalWithoutFragment(url),
+        owner,
+        repository,
+        contentKind,
+        contentId,
+      };
+    }
+  }
+
+  const discourseHostHint = hostname
+    .split(".")
+    .some((label) => label === "discourse" || label === "discuss" || label === "forum" || label === "community");
+  if (discourseHostHint && segments[0] === "t") {
+    const topicId = /^\d+$/.test(segments[1] ?? "")
+      ? segments[1]
+      : /^\d+$/.test(segments[2] ?? "")
+        ? segments[2]
+        : undefined;
+    if (topicId !== undefined) {
+      return { platform: "discourse", href: canonicalWithoutFragment(url), topicId };
+    }
   }
 
   return { platform: "generic", href: canonicalWithoutFragment(url), host: hostname };

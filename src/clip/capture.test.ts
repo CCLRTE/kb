@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -12,6 +12,7 @@ import { CONTENT_REWRITE_TRUNCATION_WARNING } from "./lib.js";
 const baseOptions = (url: string, overrides: Partial<CaptureArguments> = {}): CaptureArguments => ({
   command: "inspect",
   url: new URL(url),
+  currentTab: false,
   slug: undefined,
   mode: "http",
   scope: "auto",
@@ -26,7 +27,6 @@ const baseOptions = (url: string, overrides: Partial<CaptureArguments> = {}): Ca
   browserProfile: undefined,
   browserLive: false,
   cdp: undefined,
-  trustAttachedBrowserEgress: false,
   cookieSources: [],
   cookieProfile: undefined,
   cookiesFile: undefined,
@@ -81,6 +81,187 @@ describe("capture orchestration", () => {
     expect(effectiveScope("x", "auto")).toBe("thread");
     expect(effectiveScope("generic", "auto")).toBe("page");
     expect(effectiveScope("x", "page")).toBe("page");
+  });
+
+  test("captures from a disposable copy of a path-backed signed-in profile", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "kb-capture-profile-copy-"));
+    try {
+      const userData = join(directory, "User Data");
+      const source = join(userData, "Default");
+      mkdirSync(source, { recursive: true });
+      writeFileSync(join(userData, "Local State"), '{"os_crypt":{}}');
+      writeFileSync(join(source, "Cookies"), "source-cookie-state");
+      let observedProfile: string | null = null;
+      const observedAssetCookieProfiles: string[] = [];
+      const observedMediaCookieProfiles: string[] = [];
+      const url = "https://example.com/signed-in";
+
+      await runCapture(baseOptions(url, {
+        command: "capture",
+        mode: "browser",
+        media: "all",
+        browserProfile: userData,
+        outputBase: join(directory, "captures"),
+        stdout: false,
+      }), {
+        acquireBrowser: (options) => {
+          observedProfile = options.browserProfile ?? null;
+          expect(options.browserProfileOwnership).toBe("owned");
+          expect(options.browserProfileDirectory).toBe("Default");
+          expect(observedProfile).not.toBe(userData);
+          expect(readFileSync(join(observedProfile ?? "", "Default", "Cookies"), "utf8")).toBe(
+            "source-cookie-state",
+          );
+          return Promise.resolve({ ...acquisition(url), method: "browser-profile" });
+        },
+        extractPage: (page) => Promise.resolve({ ...extraction(url), acquisition: page }),
+        acquireCookieRecords: (options, authorizedUrl) => {
+          observedAssetCookieProfiles.push(options.cookieProfile ?? "");
+          expect(options.cookieSources).toEqual(["chrome"]);
+          expect(authorizedUrl.href).toBe(url);
+          return Promise.resolve({
+            cookies: [{
+              name: "session",
+              value: "private",
+              domain: "example.com",
+              hostOnly: true,
+              path: "/",
+              secure: true,
+              httpOnly: true,
+              sameSite: "Strict",
+              expires: 0,
+            }],
+            warnings: [],
+          });
+        },
+        localizeAssets: async (content, options) => {
+          expect(await options.cookieHeaderProvider?.(new URL("https://example.com/private.png")))
+            .toBe("session=private");
+          return { content, assets: [], warnings: [], truncated: false };
+        },
+        captureMedia: (options) => {
+          expect(options.cookieBrowser?.source).toBe("chrome");
+          observedMediaCookieProfiles.push(options.cookieBrowser?.profile ?? "");
+          return Promise.resolve({ status: "captured", records: [], metadata: null, warnings: [] });
+        },
+      });
+
+      expect(observedProfile).not.toBeNull();
+      expect(observedAssetCookieProfiles).toEqual([join(observedProfile ?? "", "Default")]);
+      expect(observedMediaCookieProfiles).toEqual([join(observedProfile ?? "", "Default")]);
+      expect(existsSync(observedProfile ?? "")).toBeFalse();
+      expect(readFileSync(join(source, "Cookies"), "utf8")).toBe("source-cookie-state");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("derives the source URL and platform scope from a current attached tab", async () => {
+    const currentUrl = "https://github.com/cclrte/kb/issues/42?view=all";
+    const browserPage: AcquiredPage = {
+      body: "<main><h1>Current issue</h1><p>Rendered issue body and comments.</p></main>",
+      contentType: "text/html",
+      finalUrl: new URL(currentUrl),
+      method: "browser-live",
+      warnings: ["Captured the current attached tab without navigation or interaction."],
+    };
+    const calls: string[] = [];
+    const result = await runCapture(baseOptions("https://unused.example", {
+      url: null,
+      currentTab: true,
+      mode: "browser",
+      browserLive: true,
+    }), {
+      acquireBrowser: (options) => {
+        calls.push("browser");
+        expect(options.url).toBeNull();
+        expect(options.currentTab).toBeTrue();
+        return Promise.resolve(browserPage);
+      },
+      acquireHttp: () => {
+        calls.push("http");
+        return Promise.reject(new Error("current target must not use HTTP acquisition"));
+      },
+      acquirePublicStructured: () => {
+        calls.push("structured");
+        return Promise.reject(new Error("current target must not use a structured network adapter"));
+      },
+      extractPage: (page, scope) => {
+        calls.push("extract");
+        expect(page).toBe(browserPage);
+        expect(scope).toBe("comments");
+        return Promise.resolve({
+          ...extraction(currentUrl, "Current issue"),
+          canonicalUrl: new URL(currentUrl),
+          platform: "github",
+          acquisition: browserPage,
+        });
+      },
+    });
+
+    expect(calls).toEqual(["browser", "extract"]);
+    expect(result.sourceUrl).toBe(currentUrl);
+    expect(result.canonicalUrl).toBe(currentUrl);
+    expect(result.platform).toBe("github");
+    expect(result.scope).toBe("comments");
+    expect(result.acquisitionMethod).toBe("browser-live");
+  });
+
+  test("sanitizes current-tab URL and title credentials before exposing paths", async () => {
+    const learnedUrl = "https://alice:DO_NOT_PRINT@example.com/private?view=all&access_token=SECRET_TOKEN";
+    const sanitizedUrl = "https://example.com/private?view=all";
+    const title = `Private page ${learnedUrl}`;
+    const root = mkdtempSync(join(tmpdir(), "clip-current-secret-test-"));
+    const browserPage: AcquiredPage = {
+      ...acquisition(learnedUrl),
+      finalUrl: new URL(learnedUrl),
+      method: "browser-live",
+    };
+
+    try {
+      const result = await runCapture(baseOptions("https://unused.example", {
+        command: "capture",
+        url: null,
+        currentTab: true,
+        mode: "browser",
+        browserLive: true,
+        outputBase: root,
+        stdout: false,
+      }), {
+        acquireBrowser: () => Promise.resolve(browserPage),
+        extractPage: (page) => {
+          expect(page.finalUrl.href).toBe(sanitizedUrl);
+          return Promise.resolve({
+            ...extraction(page.finalUrl.href, title),
+            acquisition: page,
+          });
+        },
+      });
+
+      expect(result.sourceUrl).toBe(sanitizedUrl);
+      expect(result.canonicalUrl).toBe(sanitizedUrl);
+      const canonicalRoot = realpathSync(root);
+      expect(result.outputDirectory).toStartWith(canonicalRoot);
+      expect(result.markdownPath).toStartWith(canonicalRoot);
+      const persistedPaths = [result.slug, result.outputDirectory, result.markdownPath].join("\n");
+      expect(persistedPaths).not.toContain("do-not-print");
+      expect(persistedPaths).not.toContain("secret-token");
+      expect(JSON.stringify(result)).not.toContain("DO_NOT_PRINT");
+      expect(JSON.stringify(result)).not.toContain("SECRET_TOKEN");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("redacts credential-bearing foreign titles before generating a slug", () => {
+    const value = extraction(
+      "https://example.com/private?view=all",
+      "Private page https://alice:DO_NOT_PRINT@example.com/private?access_token=SECRET_TOKEN",
+    );
+    const slug = captureSlug(baseOptions(value.canonicalUrl.href), value);
+    expect(slug).toBe("private-page-https-example-com-private");
+    expect(slug).not.toContain("do-not-print");
+    expect(slug).not.toContain("secret-token");
   });
 
   test("retains a stable social post ID in generated slugs", () => {

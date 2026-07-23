@@ -91,27 +91,39 @@ describe("CLI arguments", () => {
     });
   });
 
-  test("keeps attached-browser trust separate from private-network permission", () => {
-    const result = parseArguments([
-      "https://example.com",
-      "--browser-live",
-      "--trust-attached-browser-egress",
-    ]);
+  test("accepts attached browser capture without an acknowledgement flag", () => {
+    const result = parseArguments(["https://example.com", "--browser-live"]);
     expect(result).toMatchObject({
       ok: true,
       value: {
         browserLive: true,
-        trustAttachedBrowserEgress: true,
         allowPrivateNetwork: false,
       },
     });
-    const broadPermissionOnly = parseArguments([
-      "https://example.com",
-      "--browser-live",
-      "--allow-private-network",
-    ]);
-    expect(broadPermissionOnly.ok).toBeFalse();
-    if (!broadPermissionOnly.ok) expect(broadPermissionOnly.message).toContain("--trust-attached-browser-egress");
+  });
+
+  test("parses current as an attached-tab target whose URL is resolved during acquisition", () => {
+    expect(parseArguments(["current", "--browser-live"])).toMatchObject({
+      ok: true,
+      value: {
+        url: null,
+        currentTab: true,
+        mode: "browser",
+        browserLive: true,
+        cdp: undefined,
+      },
+    });
+    expect(parseArguments(["current", "named clip", "--cdp", "9222"])).toMatchObject({
+      ok: true,
+      value: {
+        url: null,
+        currentTab: true,
+        slug: "named clip",
+        mode: "browser",
+        browserLive: false,
+        cdp: "9222",
+      },
+    });
   });
 
   test("accepts only a numeric local CDP port so secrets never enter process arguments", () => {
@@ -119,7 +131,6 @@ describe("CLI arguments", () => {
       "https://example.com",
       "--cdp",
       "09222",
-      "--trust-attached-browser-egress",
     ]);
     expect(local).toMatchObject({ ok: true, value: { cdp: "9222" } });
     for (const endpoint of [
@@ -132,7 +143,6 @@ describe("CLI arguments", () => {
         "https://example.com",
         "--cdp",
         endpoint,
-        "--trust-attached-browser-egress",
       ]);
       expect(result).toEqual({
         ok: false,
@@ -213,8 +223,10 @@ describe("CLI arguments", () => {
     { args: ["https://example.com", "--mode", "file"], error: "requires --html" },
     { args: ["https://example.com", "--browser-live", "--browser-profile", "Work"], error: "mutually exclusive" },
     { args: ["https://example.com", "--cdp", "9222", "--browser-live"], error: "cannot be combined" },
-    { args: ["https://example.com", "--browser-live"], error: "require --trust-attached-browser-egress" },
-    { args: ["https://example.com", "--cdp", "9222"], error: "require --trust-attached-browser-egress" },
+    { args: ["current"], error: "requires --browser-live or --cdp" },
+    { args: ["current", "--browser-profile", "Work"], error: "cannot use --browser-profile" },
+    { args: ["current", "--browser-live", "--mode", "http"], error: "requires --mode auto or --mode browser" },
+    { args: ["current", "--cdp", "9222", "--html", "page.html"], error: "cannot be combined with --html" },
     { args: ["https://example.com", "--mode", "http", "--browser-profile", "Work"], error: "requires --mode auto or --mode browser" },
     { args: ["https://example.com", "--mode", "file", "--html", "page.html", "--browser-live"], error: "requires --mode auto or --mode browser" },
     { args: ["https://example.com", "--mode", "http", "--evidence", "screenshot"], error: "screenshot evidence requires" },

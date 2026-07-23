@@ -1,6 +1,6 @@
 # Capture web content
 
-`kb clip` saves public or user-entitled web content as an auditable Markdown bundle. It combines bounded structured adapters, HTTP extraction, optional browser rendering, localized assets, and explicit completeness metadata.
+`kb clip` saves public and signed-in web content as an auditable Markdown bundle. It combines bounded structured adapters, HTTP extraction, browser rendering, localized assets, and explicit completeness metadata.
 
 ## Check local capabilities
 
@@ -54,7 +54,7 @@ kb clip https://example.com/article --html "$KB_SAVED_HTML"
 kb clip https://example.com/article --html - < page.html
 ```
 
-Default resource bounds are 30 seconds per request, process, or extraction operation; 500 scoped items; depth 16; 25 MB of HTML; 100 MB per asset; and 500 MB across assets. Browser expansion also has fixed DOM, click, and scroll ceilings. Reaching a bound is recorded and can downgrade a result to `partial`.
+Default resource bounds are 30 seconds per request, process, or extraction operation; 500 scoped items; depth 16; 25 MB of HTML; 100 MB per asset; and 500 MB across assets. Browser observation also has fixed DOM and scroll ceilings. Reaching a bound is recorded and can downgrade a result to `partial`.
 
 ## Capture images, media, and evidence
 
@@ -71,30 +71,33 @@ Image downloads are signature-checked, content-addressed, byte-bounded, and rewr
 
 Source evidence is sanitized into inert HTML with credential-shaped values redacted and a deny-all content security policy. Screenshots are viewport-only pixels and are not structurally sanitized. They may contain private content or notifications, so review them before retaining or sharing a bundle.
 
-## Use authenticated capture
+## Capture a signed-in page
 
-Set path variables to private absolute paths outside the repository:
+If the page is already open, read the current tab without navigating it:
+
+```sh
+kb clip current --browser-live
+kb clip current --cdp 9222
+```
+
+For `--browser-live`, first enable Chrome's local debugging connection at `chrome://inspect/#remote-debugging` (Chrome 144+). If Chrome was launched with an explicit loopback debugging port, pass that numeric port to `--cdp` instead.
+
+To open a URL with existing browser state, select a profile name or path. Path-backed profiles run from a temporary copy, so the source profile is unchanged:
 
 ```sh
 kb clip https://example.com/member/article --browser-profile "$KB_CAPTURE_PROFILE"
+```
+
+Cookie-backed HTTP capture is useful when the page does not require local storage, IndexedDB, or other browser-only state:
+
+```sh
 kb clip https://example.com/member/article --cookie-source chrome --cookie-profile "Default"
 kb clip https://example.com/member/article --cookies-file "$KB_COOKIES_FILE"
 ```
 
 Choose at most one browser session and one cookie input. A browser session may use a separate cookie input for later asset or media downloads because attached browser state is not exported.
 
-Owned browser sessions run through a DNS-validating, address-pinning loopback proxy. Explicit cookies are filtered to matching request targets and kept in memory, except for a short-lived mode-`0600` yt-dlp jar. The CLI does not probe cookie stores unless the user selects one.
-
-Live and CDP attachment use an existing browser network stack and mutate the active tab. They require a separate acknowledgement:
-
-```sh
-kb clip https://example.com/member/article --browser-live --trust-attached-browser-egress
-kb clip https://example.com/member/article --cdp 9222 --trust-attached-browser-egress
-```
-
-The acknowledgement does not allow controlled capture lanes to reach private networks. `--allow-private-network` is a separate broad opt-in. It should remain off for ordinary web capture.
-
-Never store cookie files, authorization values, browser profiles, raw authenticated DOM, or HARs in a bundle or repository. Capture only content the user is entitled and permitted to automate. The CLI does not bypass login, paywall, CAPTCHA, rate-limit, DRM, audience, or platform-policy controls.
+Current-tab capture issues no navigation, click, form, typing, upload, or submit command. URL-based browser capture may navigate and scroll within fixed work limits, taking bounded observations as content is rendered. Both routes are ingestion-only: they do not post, like, follow, send, delete, or submit.
 
 ## Interpret status and counts
 
@@ -116,7 +119,9 @@ A `complete` or `partial` capture exits with status 0. Authentication, blocked, 
 - Bluesky uses public AT Protocol resolution and thread APIs.
 - Reddit first tries its unofficial public listing JSON and falls back when that surface is denied or changes.
 - X uses article extraction plus rendered capture; unloaded or virtualized replies remain partial.
-- Substack uses article extraction and an authorized browser for subscriber text when selected.
-- Instagram, Facebook, LinkedIn, TikTok, and arbitrary applications use generic rendered or saved-HTML capture. They do not gain a trustworthy item tree without a dedicated adapter.
+- Substack uses article extraction and a signed-in browser for subscriber text when selected.
+- GitHub issues, pull requests, and discussions use the Defuddle GitHub extractor, with a signed-in browser fallback for private repositories.
+- Discourse topics use the Defuddle Discourse extractor and rendered fallback.
+- Instagram, Facebook, LinkedIn, TikTok, Threads, WhatsApp Web, YouTube, and arbitrary applications use rendered or saved-HTML capture. They do not gain a trustworthy item tree without a dedicated adapter.
 
 Platform markup and endpoints change. Run `kb adapters` for the installed version's current claims.

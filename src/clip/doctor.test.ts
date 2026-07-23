@@ -11,6 +11,7 @@ import {
   runDiagnosticCommand,
   type DiagnosticCommand,
 } from "./doctor.js";
+import { classifiedPlatforms } from "./platforms.js";
 
 function packageManifest(name: string, version: string): string {
   return JSON.stringify({ name, version });
@@ -165,20 +166,28 @@ test("adapter matrix names every promised surface and communicates bounded acces
     "Substack",
     "Instagram",
     "LinkedIn",
-    "Paywalled sites",
+    "Signed-in pages",
     "Hacker News",
     "Reddit",
     "Facebook",
     "TikTok",
     "Bluesky",
+    "Threads",
+    "WhatsApp Web",
+    "YouTube",
+    "GitHub issues, pull requests, and discussions",
+    "Discourse",
   ]) {
     expect(adapterCapabilities.some((capability) => capability.platform === platform)).toBeTrue();
     expect(rendered).toContain(platform);
   }
   expect(adapterCapabilities.find(({ platform }) => platform === "Generic web")?.conversations).toBe("best-effort");
+  for (const platform of classifiedPlatforms) {
+    expect(adapterCapabilities.some(({ id }) => id === platform)).toBeTrue();
+  }
   expect(rendered).toContain("site-specific item trees are not inferred generically");
-  expect(rendered).toContain("Never bypasses a paywall, DRM, login, or other access control");
-  expect(rendered).toContain("HAR-derived clients");
+  expect(rendered).toContain("current browser tab");
+  expect(rendered).toContain("ingestion-only");
 });
 
 test("diagnostic timeouts escalate to SIGKILL when a child ignores SIGTERM", async () => {

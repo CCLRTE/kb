@@ -1,103 +1,134 @@
 ---
 name: clip-article
 description: >-
-  Capture web content into a local Markdown knowledge base as auditable bundles
-  with local assets. Use when the user asks to clip, scrape, save, or archive
-  an article, social post or thread, discussion, subscriber page they can
-  access, or rendered browser page. Supports public APIs, bounded HTTP,
-  explicit signed-in browser state, saved HTML, media, evidence, and honest
-  completeness reporting.
+  Capture public or signed-in web content into a local Markdown knowledge base
+  as an auditable source bundle with local assets. Use when the user asks to
+  clip, save, scrape, or archive an article, social post or thread, GitHub or
+  Discourse discussion, feed, inbox, private document, WhatsApp conversation,
+  YouTube page, or another page already visible in their browser. Supports URL
+  capture, the current signed-in tab, temporary browser-profile snapshots,
+  saved HTML, media, evidence, honest completeness, and knowledge-base linking.
 ---
 
 # Capture web content
 
-Check the installed capture surface before using browser state or optional media tools:
+Use the installed `kb` CLI. Check the available local routes when the capture may need a browser or optional media tools:
 
 ```sh
 kb doctor
 kb adapters
 ```
 
-Use the layered default first:
+Resolve `<vault>` to the directory containing the managed `index.md`, then set
+the shell-local `KB_ROOT` to that path (`KB_ROOT=kb` from a typical repository
+root, or `KB_ROOT=.` from inside the vault). Pass `--output "$KB_ROOT/articles"`
+to captures and read the vault's applicable agent instructions before writing.
+
+## Pick the read surface
+
+Start ordinary URL capture with the layered default:
 
 ```sh
-kb clip https://example.com/article
+kb clip https://example.com/article --output "$KB_ROOT/articles"
 ```
 
-The command tries stable structured APIs, bounded HTTP extraction, and a rendered browser when the platform or result needs it. By default it writes an atomic bundle under `kb/articles/<slug>/` containing `<slug>.md`, `capture.json`, and any localized assets.
+The command tries stable structured data, bounded HTTP extraction, and rendered-browser fallback as needed.
 
-Inspect without writing:
+When the source is already open in a signed-in browser, read the current tab in place:
 
 ```sh
-kb inspect https://example.com/article
-kb inspect https://example.com/article --json
+kb clip current --browser-live --output "$KB_ROOT/articles"
+kb clip current --cdp 9222 --output "$KB_ROOT/articles"
 ```
 
-## Use authenticated state deliberately
+For `--browser-live`, first enable Chrome's local debugging connection at `chrome://inspect/#remote-debugging` (Chrome 144+). If Chrome was launched with an explicit loopback debugging port, pass that numeric port to `--cdp` instead.
 
-Use signed-in state only when public capture is incomplete or access-gated. Set path variables to private absolute paths outside the repository before running these examples.
+Current-tab capture derives the source URL from the attached tab. It does not navigate, click, type, submit, upload, or scroll that tab.
+
+To open a URL with existing browser state, select a profile. A path-backed profile is copied into a temporary snapshot for the capture, so the source profile remains unchanged:
 
 ```sh
-kb clip https://example.com/member/article --browser-profile "$KB_CAPTURE_PROFILE"
-kb clip https://example.com/member/article --cookie-source chrome --cookie-profile "Default"
-kb clip https://example.com/member/article --cookie-source firefox --cookie-profile "work"
-kb clip https://example.com/member/article --cookies-file "$KB_COOKIES_FILE"
-kb clip https://example.com/member/article --browser-live --trust-attached-browser-egress
-kb clip https://example.com/member/article --cdp 9222 --trust-attached-browser-egress
+kb clip https://example.com/member/article --browser-profile "$KB_CAPTURE_PROFILE" --output "$KB_ROOT/articles"
 ```
 
-Select at most one browser session (`--browser-profile`, `--browser-live`, or `--cdp`) and at most one cookie input (`--cookie-source` or `--cookies-file`). A browser session may be combined with one cookie input when later image or media downloads also need authentication, because attached browser state is not exported.
-
-Cookie capture is request-filtered and retained in memory. Owned fresh sessions preserve each validated cookie's host or domain, path, `Secure`, `HttpOnly`, `SameSite`, and expiry attributes. Cookie values travel to the browser helper over stdin, not process arguments. Attribute-less Cookie and cURL inputs are narrowed to the exact host and target path, made `Secure` on HTTPS, defaulted to `HttpOnly` and `SameSite=Strict`, and reported with a warning.
-
-Prefer a dedicated per-site profile. A broad personal profile can expose unrelated signed-in state to target-controlled subresources. A path-backed persistent profile can also be changed by page activity.
-
-Owned browser sessions run through a loopback filtering proxy that validates and pins DNS for every request. Attached `--browser-live` and `--cdp` sessions use an existing browser network stack and therefore require `--trust-attached-browser-egress`. They navigate, click eligible disclosure controls, and scroll the active tab. This acknowledgement does not enable private-network access in controlled HTTP, browser, asset, structured-data, or media lanes. `--allow-private-network` is a separate, broad opt-in.
-
-Never probe cookie stores merely to discover capabilities. Read [references/authentication.md](references/authentication.md) before using signed-in state, subscriber content, screenshots, or HAR-derived clients.
-
-## Import saved HTML
-
-For a page already rendered in any browser, save its HTML and import it without browser automation:
+Use cookie-backed HTTP when the page does not require browser-only local state, or import a page already saved from any browser:
 
 ```sh
-kb clip https://example.com/article --html "$KB_SAVED_HTML"
-kb clip https://example.com/article --html - < page.html
+kb clip https://example.com/member/article --cookie-source chrome --cookie-profile "Default" --output "$KB_ROOT/articles"
+kb clip https://example.com/member/article --cookies-file "$KB_COOKIES_FILE" --output "$KB_ROOT/articles"
+kb clip https://example.com/article --html "$KB_SAVED_HTML" --output "$KB_ROOT/articles"
+kb clip https://example.com/article --html - --output "$KB_ROOT/articles" < page.html
 ```
+
+Read [references/authentication.md](references/authentication.md) for current-tab, profile, cookie, and saved-page selection details.
+
+## Keep the boundary ingestion-only
+
+Capture reads source material. It never posts, likes, follows, sends, deletes, reacts, or submits. URL-based browser capture may navigate to the requested URL and scroll within fixed work limits, taking bounded observations as content is rendered; those operations exist only to reveal content for ingestion.
+
+If a new surface needs support, add an extraction route, fixture coverage, or a generic rendered-page fallback. Do not add a write-capable provider integration to clipping.
 
 ## Choose scope and artifacts
 
 ```sh
-kb clip https://example.com/post --scope page
-kb clip https://example.com/post --scope thread
-kb clip https://example.com/post --media none
-kb clip https://example.com/post --media all
-kb clip https://example.com/post --evidence source
-kb clip https://example.com/post --evidence all
+kb clip https://example.com/post --scope page --output "$KB_ROOT/articles"
+kb clip https://example.com/post --scope thread --output "$KB_ROOT/articles"
+kb clip https://example.com/discussion --scope comments --output "$KB_ROOT/articles"
+kb clip https://example.com/post --media none --output "$KB_ROOT/articles"
+kb clip https://example.com/post --media all --output "$KB_ROOT/articles"
+kb clip https://example.com/post --evidence source --output "$KB_ROOT/articles"
+kb clip https://example.com/post --evidence all --output "$KB_ROOT/articles"
 kb clip https://example.com/post --output "$KB_CAPTURE_OUTPUT"
-kb clip https://example.com/post --force
+kb clip https://example.com/post --force --output "$KB_ROOT/articles"
 ```
 
-`--media all` uses yt-dlp only for accessible, non-DRM media and routes its downloader through the same DNS-pinning proxy. Source evidence is sanitized into inert HTML with credential-shaped values redacted. Screenshots are viewport-only pixels; they are not structurally sanitized and may contain private information. A bundle accepts a screenshot only from the acquisition candidate whose text was selected.
+With the resolved output path, `kb clip` installs one atomic bundle under
+`$KB_ROOT/articles/<slug>/`:
 
-Raw authenticated DOM, cookie files, browser state, and HAR files must never enter a capture bundle or repository.
+```text
+<slug>/
+  <slug>.md
+  capture.json
+  assets/
+  evidence/       # only when requested
+```
+
+The Markdown is the readable source record. `capture.json` records the source and canonical URLs, acquisition attempts, selected extractor, status, counts, warnings, localized asset hashes, and requested evidence outcomes. A partial failure can preserve useful source text without overstating completeness.
+
+`--media all` localizes accessible, non-DRM audio or video when yt-dlp is installed. Source evidence is stored as sanitized inert HTML. Screenshots are viewport pixels and can include everything visible in the tab, so inspect them before retaining or sharing a bundle.
 
 ## Report completeness literally
 
-Read [references/platforms.md](references/platforms.md) when selecting a platform route. Use `kb adapters --json` when software needs the current capability matrix.
+Read [references/platforms.md](references/platforms.md) when selecting or explaining a route. Use `kb adapters --json` when software needs the installed capability matrix.
 
-Interpret `complete`, `partial`, `auth-required`, `blocked`, and `unsupported` literally. A useful `partial` capture exits successfully, but its warnings and expected-versus-captured counts remain part of the result. Virtualized, collapsed, unloaded, paginated, or otherwise unstructured replies stay `partial`, often with `capturedItems: 0` even when visible prose was retained.
+Interpret status as follows:
 
-For page scope, item counts cover primary entries. For thread and comment scopes, they cover replies or comments and exclude the root, quotes, ancestors, and pagination markers. `--timeout-ms` applies independently to each request, process, or extraction operation rather than to the entire multi-lane capture.
+- `complete`: the selected bounded representation has no known missing boundary.
+- `partial`: useful content was retained, but a count, cursor, configured bound, hidden branch, unloaded region, or generic rendered representation prevents a completeness claim.
+- `auth-required`: the selected routes reached a sign-in gate.
+- `blocked`: the source returned a block or verification shell.
+- `unsupported`: no route produced usable source material.
 
-Visible gate heuristics do not establish permission. Capture only public content or content the user is entitled and permitted to automate. Do not bypass login, paywall, CAPTCHA, rate-limit, DRM, audience, or platform-policy controls.
+For page scope, item counts cover primary entries. For thread and comment scopes, they cover replies or comments and exclude the root, quotes, ancestors, and pagination markers. A rendered conversation can retain visible prose while reporting `capturedItems: 0` when the page does not expose a trustworthy item tree.
 
-## Review the bundle
+Preserve missing, deleted, blocked, cyclic, depth-limited, item-limited, and pagination-boundary states. Never upgrade a fallback to `complete` when declared counts, cursors, virtualization, or configured bounds disagree.
 
-After writing a clip:
+## Separate source from synthesis
 
-1. Compare the Markdown, quoted context, item counts, warnings, and asset list with the source.
-2. Inspect large or surprising assets and every requested evidence artifact.
-3. Run the knowledge base's normal refresh and check commands if the new note participates in its graph.
+Treat the captured Markdown and manifest as the source record. Put summaries, comparisons, decisions, and changing interpretations in a maintained note rather than rewriting the capture to match a later conclusion.
 
-When changing capture behavior, run the public repository check and a live capture of public, non-sensitive content. Never use private accounts or credential-bearing fixtures in tests.
+Connect the maintained note to the capture with an explicit wikilink. Let `kb backlinks` derive incoming relationships; do not insert reciprocal links or generated backlink sections into authored notes. After adding or linking a capture, run the vault's normal refresh and check loop:
+
+```sh
+kb refresh --root "$KB_ROOT"
+kb check --root "$KB_ROOT"
+```
+
+## Review the result
+
+1. Compare the Markdown, quoted context, counts, warnings, and assets with the source surface.
+2. Confirm the manifest names the route that actually supplied the selected text.
+3. Inspect requested screenshots, source evidence, and unexpectedly large assets.
+4. Report what was captured, what remains partial, where the bundle was written, and which maintained note links to it.
+
+When changing clipping behavior, add focused fixtures for the affected surface and run the public package checks plus a representative capture.

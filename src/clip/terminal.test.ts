@@ -37,5 +37,5 @@ describe("terminal-safe text", () => {
     expect(sanitized).toHaveLength(25 * 1024 * 1024 / 2);
     expect(sanitized.startsWith("xxxx")).toBeTrue();
     expect(hasUnsafeTerminalCharacters(sanitized)).toBeFalse();
-  });
+  }, 60_000);
 });

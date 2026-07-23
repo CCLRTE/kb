@@ -1,4 +1,4 @@
-import type { CaptureArguments, CaptureScope } from "./args.js";
+import { captureUrl, type CaptureArguments, type CaptureScope } from "./args.js";
 import type { AcquisitionMethod, AcquiredPage } from "./acquire.js";
 import { countWords, type CaptureStatus, type ExtractedPage } from "./extract.js";
 import type { Article } from "./lib.js";
@@ -210,7 +210,7 @@ export function structuredCaptureFromDocument(
   const acquisition: AcquiredPage = {
     body: JSON.stringify(evidence),
     contentType: "application/json",
-    finalUrl: options.url,
+    finalUrl: captureUrl(options),
     method,
     warnings,
   };
@@ -421,7 +421,7 @@ export async function acquirePublicStructured(
   options: CaptureArguments,
   dependencies: AdapterDependencies = {},
 ): Promise<PublicStructuredCapture | null> {
-  const classified = classifyPlatformUrl(options.url.href);
+  const classified = classifyPlatformUrl(captureUrl(options).href);
   if (classified === null) return null;
   const fetchJson = dependencies.fetchJson
     ?? ((url, maxBytes, timeoutMs) => defaultJsonFetcher(options, url, maxBytes, timeoutMs));
