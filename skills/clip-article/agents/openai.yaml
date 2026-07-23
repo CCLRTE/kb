@@ -1,6 +1,0 @@
-interface:
-  display_name: "Universal Web Clipper"
-  short_description: "Capture pages, posts, threads, media, and comments"
-  default_prompt: "Use $clip-article to capture this URL with the strongest permitted adapter and report completeness honestly."
-policy:
-  allow_implicit_invocation: true

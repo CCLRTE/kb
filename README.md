@@ -89,9 +89,9 @@ A vector score means that two passages occupy a nearby region in an embedding mo
 
 ### Write plans and operating rules back into the vault
 
-A plan shown only in chat has the same session boundary as the reasoning that produced it. The package's `write-plan` skill writes the plan as a normal file with an outcome, status, area, assumptions, dependencies, decisions, and a verification method. During execution, the same file accumulates deviations, review findings, command evidence, and the final result. Completed plans remain as history; current operating truth moves into code, documentation, or maintained notes.
+A plan shown only in chat has the same session boundary as the reasoning that produced it. The package's `plan-kb` skill writes the plan as a normal file with an outcome, status, area, assumptions, dependencies, decisions, and a verification method. During execution, the same file accumulates deviations, review findings, command evidence, and the final result. Completed plans remain as history; current operating truth moves into code, documentation, or maintained notes.
 
-CCLRTE/kb ships four Agent Skills with the installed package. `clip-article` selects an acquisition route and records completeness. `query-kb` chooses among exact metadata, graph traversal, and semantic search. `refresh-kb` regenerates the catalog and reviews link diagnostics without manufacturing edges. `write-plan` keeps execution knowledge durable. The [agent workflow documentation](<https://github.com/CCLRTE/kb/blob/main/docs/agent-workflow.md>) defines how those skills meet the same CLI contracts across agent runners.
+CCLRTE/kb ships four Agent Skills with the installed package. `save-url-kb` selects an acquisition route and records completeness. `query-kb` chooses among exact metadata, graph traversal, and semantic search. `refresh-kb` regenerates the catalog and reviews link diagnostics without manufacturing edges. `plan-kb` keeps execution knowledge durable. Their shared `-kb` suffix makes the skill family easy to scan and invoke consistently. The [agent workflow documentation](<https://github.com/CCLRTE/kb/blob/main/docs/agent-workflow.md>) defines how those skills meet the same CLI contracts across agent runners.
 
 ### Adopt the parts that prevent repeated rediscovery
 
@@ -104,10 +104,10 @@ The limits are equally modular. Capture records what a selected surface exposed;
 
 [Bun](https://bun.sh/docs/installation) is the required runtime.
 
-Install the CLI from the immutable `v0.2.0` tag:
+Install the CLI from the immutable `v0.2.1` tag:
 
 ```sh
-bun add --global github:CCLRTE/kb#v0.2.0
+bun add --global github:CCLRTE/kb#v0.2.1
 kb --help
 ```
 
@@ -116,7 +116,7 @@ For programmatic use, declare the same pinned source in a project:
 ```json
 {
   "dependencies": {
-    "@cclrte/kb": "github:CCLRTE/kb#v0.2.0"
+    "@cclrte/kb": "github:CCLRTE/kb#v0.2.1"
   }
 }
 ```
@@ -196,6 +196,6 @@ The package exports its full programmatic surface from `@cclrte/kb`; focused ent
 
 ## Agent skills
 
-The repository and packed package ship four reusable Agent Skills under `skills/`: `clip-article` for auditable ingestion, `refresh-kb` for graph maintenance, `query-kb` for choosing exact, structural, keyword, or semantic retrieval, and `write-plan` for creating and growing durable implementation plans. Copy or link a skill directory into the location used by your agent runner. They invoke the installed `kb` command and do not depend on a repository checkout path.
+The repository and packed package ship four reusable Agent Skills under `skills/`: `save-url-kb` for auditable ingestion, `refresh-kb` for graph maintenance, `query-kb` for choosing exact, structural, keyword, or semantic retrieval, and `plan-kb` for creating and growing durable implementation plans. Copy or link a skill directory into the location used by your agent runner. They invoke the installed `kb` command and do not depend on a repository checkout path.
 
 See [Design](docs/design.md), [Agent workflow](docs/agent-workflow.md), and [Contributing](CONTRIBUTING.md) for the durable contracts and development gate. CCLRTE/kb is available under the [MIT License](LICENSE).

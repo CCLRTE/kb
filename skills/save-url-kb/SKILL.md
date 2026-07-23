@@ -1,5 +1,5 @@
 ---
-name: clip-article
+name: save-url-kb
 description: >-
   Capture public or signed-in web content into a local Markdown knowledge base
   as an auditable source bundle with local assets. Use when the user asks to

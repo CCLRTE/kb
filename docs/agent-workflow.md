@@ -58,7 +58,7 @@ Before creating a plan, use `kb list --where type=plan` and search the vault for
 
 A durable plan records an observable outcome, context, scope and non-goals, constraints, decisions, dependency-ordered work, verification, and recovery. Keep its frontmatter easy to query—at minimum `type: plan`, an area, and one status from `proposed`, `accepted`, `in-progress`, `blocked`, `completed`, `superseded`, or `cancelled`. Add dated findings, decisions, review evidence, and the final result to the same file as the work develops.
 
-The packaged `write-plan` Agent Skill provides the complete authoring workflow. It treats a plan as a growing implementation record, not a disposable checklist or a directory of satellite status documents.
+The packaged `plan-kb` Agent Skill provides the complete authoring workflow. It treats a plan as a growing implementation record, not a disposable checklist or a directory of satellite status documents.
 
 ## Link for meaning
 
