@@ -112,6 +112,22 @@ The limits are equally modular. Capture records what a selected surface exposed;
 
 [Bun](https://bun.sh/docs/installation) is the required runtime.
 
+### Tell your coding agent to install it
+
+Copy this prompt into Codex, Claude Code, or another coding agent:
+
+```text
+Install CCLRTE/kb and its bundled Agent Skills from
+https://github.com/CCLRTE/kb at the immutable v0.3.2 tag. Follow the repository
+README, install the `kb` CLI, copy or link the skills I need into this agent
+runner's configured skills directory, and verify the installation with
+`kb doctor` and `kb --help`. Do not initialize or modify a vault until I ask.
+```
+
+The repository and packed package carry the same skill directories, so an agent
+can inspect the tagged instructions before placing them in its runner-specific
+discovery path.
+
 Install the CLI from the immutable `v0.3.2` tag:
 
 ```sh
