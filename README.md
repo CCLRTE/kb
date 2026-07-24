@@ -1,25 +1,29 @@
-# hraness/kb
+# hraness.info
 
-hraness/kb is a simple, local-first command-line tool for an Obsidian-compatible Markdown knowledge base for coding agents. It keeps notes readable without the tool, queries typed frontmatter, derives a deterministic link graph from explicit wikilinks, offers optional local semantic recall, and captures web and PDF sources as auditable bundles instead of opaque blobs.
+Hraness Info is an agent librarian. Its `kb` command keeps an
+Obsidian-compatible Markdown knowledge base readable without the tool, queries
+typed frontmatter, derives a deterministic link graph from explicit wikilinks,
+offers optional local semantic recall, and captures web and PDF sources as
+auditable bundles instead of opaque blobs.
 
 The CLI is Bun-first. Refresh, graph navigation, exact metadata queries, and capture do not require a model, an API key, a database, or a hosted service. Semantic search uses a replaceable local QMD index; Markdown remains the source of truth.
 
 <!-- article:a-durable-knowledge-base-is-a-write-path:start -->
-## [A knowledge base for your coding agents](<https://hraness.pub/articles/a-durable-knowledge-base-is-a-write-path>)
+## [Hraness Info is an agent librarian](<https://hraness.pub/articles/a-durable-knowledge-base-is-a-write-path>)
 
-> Coding agents need memory that survives the chat. hraness/kb keeps it in Markdown and Git, with local search and deterministic structure.
+> It gives coding agents memory that survives the chat using plain Markdown, Git history, deterministic structure, and optional local search.
 
 A coding agent can inspect a repository and finish a task, then begin the next session without the decisions, evidence, or rejected approaches that shaped the first one. A longer context window delays that loss. It does not create maintained memory that another agent can inspect and improve.
 
-[hraness/kb is an open-source knowledge base for coding agents](<https://github.com/hraness/kb>). It keeps source records, maintained understanding, plans, and their relationships in ordinary Markdown under Git. Deterministic commands handle exact metadata and links; local semantic search helps when the right note uses different words. The package stays deliberately close to files so a team can change agents, editors, or search tools without migrating its memory.
+[Hraness Info is an agent librarian](<https://hraness.info>). It keeps source records, maintained understanding, plans, and their relationships in ordinary Markdown under Git. Its open-source [kb package](<https://github.com/hraness/kb>) handles exact metadata and links; local semantic search helps when the right note uses different words. The package stays deliberately close to files so a team can change agents, editors, or search tools without migrating its memory.
 
 ![Four icon cards show sources flowing into durable memory, linked ideas, and search for reuse by future coding-agent sessions.](<https://hraness.pub/article-diagrams/a-durable-knowledge-base-is-a-write-path.light.webp>)
 
-*hraness/kb turns source material into memory that agents can link and find again.*
+*Hraness Info turns source material into memory that agents can link and find again.*
 
 The default layout separates authored records from derived views. These directories are useful conventions, not a framework that application code must import:
 
-**Default hraness/kb vault and its derived views**
+**Default Hraness Info vault and its derived views**
 
 ```text
 kb/
@@ -41,7 +45,7 @@ Markdown is the authority in this map. The catalog, backlink view, and semantic 
 
 This design direction did not begin with one recent proposal. Cognition's [2024 Devin release history](<https://docs.devin.ai/release-notes/2024>) described Knowledge that Devin could recall across future sessions by September 2024 and automatic Repo Knowledge from repository scans by November. On April 3, 2025, [Devin 2.0 introduced Devin Wiki and Devin Search](<https://cognition.com/blog/devin-2>). Cognition then launched the public [DeepWiki service on May 5](<https://cognition.com/blog/deepwiki>), followed on May 22 by a [DeepWiki Model Context Protocol server](<https://cognition.com/blog/deepwiki-mcp-server>) for programmatic retrieval. Those products are codebase-oriented and managed by Cognition, but the chronology matters: they predate the later public LLM-wiki discussion.
 
-In April 2026, Andrej Karpathy published an [LLM Wiki proposal](<https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f>) with three layers: raw sources, an agent-maintained Markdown wiki, and an instruction schema. Its operations are ingest, query, and lint, with QMD suggested when the collection outgrows an index file. hraness/kb is not an implementation of Cognition's products, and the similar pieces do not establish direct lineage. They show convergence on the same pressure: useful reasoning must become a durable artifact before a session ends.
+In April 2026, Andrej Karpathy published an [LLM Wiki proposal](<https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f>) with three layers: raw sources, an agent-maintained Markdown wiki, and an instruction schema. Its operations are ingest, query, and lint, with QMD suggested when the collection outgrows an index file. Hraness Info is not an implementation of Cognition's products, and the similar pieces do not establish direct lineage. They show convergence on the same pressure: useful reasoning must become a durable artifact before a session ends.
 
 ### Keep the substrate boring and portable
 
@@ -91,7 +95,7 @@ The first command finds active browser plans in a reproducible order. The second
 
 ### Let semantic search find language, not truth
 
-Exact structure cannot find a note whose author used an unexpected phrase. For that lane, hraness/kb embeds [QMD, a local search engine for Markdown](<https://github.com/tobi/qmd>). `kb search` defaults to QMD's vector-only search path. It uses the recommended English-optimized `embeddinggemma-300M-Q8_0` model, roughly a 300 MB download, without loading QMD's query-expansion or reranking models. The model and index stay local.
+Exact structure cannot find a note whose author used an unexpected phrase. For that lane, Hraness Info embeds [QMD, a local search engine for Markdown](<https://github.com/tobi/qmd>). `kb search` defaults to QMD's vector-only search path. It uses the recommended English-optimized `embeddinggemma-300M-Q8_0` model, roughly a 300 MB download, without loading QMD's query-expansion or reranking models. The model and index stay local.
 
 **Prewarm the local index and search by meaning**
 
@@ -108,7 +112,7 @@ A vector score means that two passages occupy a nearby region in an embedding mo
 
 A plan shown only in chat has the same session boundary as the reasoning that produced it. The package's `plan-kb` skill writes the plan as a normal file with an outcome, status, area, assumptions, dependencies, decisions, and a verification method. During execution, the same file accumulates deviations, review findings, command evidence, and the final result. Completed plans remain as history; current operating truth moves into code, documentation, or maintained notes.
 
-hraness/kb ships five Agent Skills with the installed package. `save-url-kb` selects an acquisition route and records completeness. `save-pdf-kb` turns local files and public PDF URLs into Markdown while preserving native text, image text, visual assets, original bytes, and source provenance. `query-kb` chooses among exact metadata, graph traversal, and semantic search. `refresh-kb` regenerates the catalog and reviews link diagnostics without manufacturing edges. `plan-kb` keeps execution knowledge durable. Their shared `-kb` suffix makes the skill family easy to scan and invoke consistently. The [agent workflow documentation](<https://github.com/hraness/kb/blob/main/docs/agent-workflow.md>) defines how those skills meet the same CLI contracts across agent runners.
+Hraness Info ships five Agent Skills with the installed package. `save-url-kb` selects an acquisition route and records completeness. `save-pdf-kb` turns local files and public PDF URLs into Markdown while preserving native text, image text, visual assets, original bytes, and source provenance. `query-kb` chooses among exact metadata, graph traversal, and semantic search. `refresh-kb` regenerates the catalog and reviews link diagnostics without manufacturing edges. `plan-kb` keeps execution knowledge durable. Their shared `-kb` suffix makes the skill family easy to scan and invoke consistently. The [agent workflow documentation](<https://github.com/hraness/kb/blob/main/docs/agent-workflow.md>) defines how those skills meet the same CLI contracts across agent runners.
 
 ### Adopt the parts that prevent repeated rediscovery
 
