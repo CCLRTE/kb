@@ -1,6 +1,9 @@
 # Capture PDF documents
 
-`kb pdf` converts a local PDF into an auditable Markdown bundle. It preserves
+`kb pdf` converts a local PDF or a public HTTP(S) PDF into an auditable Markdown
+bundle. Remote downloads use the same DNS-pinned, private-network-denying
+acquisition boundary as web capture, and sensitive URL parameters are removed
+before provenance is persisted. It preserves
 the original bytes, reconstructs native document structure, extracts embedded
 images, and uses local OCR for text that exists only inside scans or
 screenshots.
@@ -10,6 +13,7 @@ screenshots.
 ```sh
 kb doctor
 kb pdf "/absolute/path/to/document.pdf" --output articles
+kb pdf "https://example.com/document.pdf" --output articles
 kb pdf "/absolute/path/to/document.pdf" --slug stable-slug --output articles
 ```
 

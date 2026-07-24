@@ -1,7 +1,7 @@
 ---
 name: save-pdf-kb
 description: >-
-  Convert a local PDF into an auditable Markdown knowledge-base bundle with the
+  Convert a local or public remote PDF into an auditable Markdown knowledge-base bundle with the
   original document, inferred headings, page provenance, OCR text, image
   metadata, and local visual assets. Use when the user asks to save, import,
   archive, extract, or turn a PDF into KB Markdown, especially scanned
@@ -20,6 +20,7 @@ Check the local conversion routes, then capture the PDF:
 ```sh
 kb doctor
 kb pdf "/absolute/path/to/document.pdf" --output "$KB_ROOT/articles"
+kb pdf "https://example.com/document.pdf" --output "$KB_ROOT/articles"
 ```
 
 Pass a stable slug or replace a prior tool-owned bundle only when needed:

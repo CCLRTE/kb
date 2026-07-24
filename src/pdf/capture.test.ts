@@ -116,6 +116,24 @@ function sourceFixture(): { readonly root: string; readonly sourcePath: string; 
 }
 
 describe("PDF capture", () => {
+  test("records remote source provenance in the manifest and Markdown", async () => {
+    const fixture = sourceFixture();
+    const outcome = await runPdfCapture({
+      inputPath: fixture.sourcePath,
+      outputBase: fixture.outputBase,
+      remoteSource: {
+        requestedUrl: "https://example.com/paper",
+        finalUrl: "https://cdn.example.com/paper.pdf",
+      },
+    }, fakeDependencies());
+
+    expect(outcome.manifest.source).toMatchObject({
+      requestedUrl: "https://example.com/paper",
+      finalUrl: "https://cdn.example.com/paper.pdf",
+    });
+    expect(outcome.markdown).toContain('source_url: "https://cdn.example.com/paper.pdf"');
+  });
+
   test("keeps OCR-rich screenshots visible and classifies them as mixed", async () => {
     const fixture = sourceFixture();
     const outcome = await runPdfCapture({

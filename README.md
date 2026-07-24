@@ -61,7 +61,16 @@ A capture produces readable Markdown beside `capture.json` and any localized ass
 
 Media follows the same evidence rule. Images from ordinary pages, X, LinkedIn, and other rendered surfaces are localized into the bundle, while exposed video posters remain inspectable without downloading the full video. A normal YouTube capture adds available title, description, duration, channel, thumbnail, and transcript context; full audio or video remains an explicit opt-in.
 
-Local PDFs use the same durable bundle idea without pretending a file is a URL. `kb pdf` keeps the original PDF byte-for-byte, infers headings from native layout, extracts every embedded image, and uses local OCR for scans and screenshots. Text-bearing images become inspectable Markdown with page and geometry metadata while the source image remains available; primarily visual images stay embedded. This matters for hybrid documents such as exported reports whose later pages are really Slack messages, diagrams, or photographs.
+PDFs use the same durable bundle whether the input is a local path or a public HTTP(S) URL. `kb pdf` sends remote input through the same DNS-pinned, private-network-denying acquisition boundary as web capture, then removes sensitive URL parameters before saving provenance. Local and remote captures keep the original PDF byte-for-byte, infer headings from native layout, extract every embedded image, and use local OCR for scans and screenshots.
+
+**Capture a local or public remote PDF**
+
+```shell
+kb pdf "/absolute/path/to/document.pdf" --output articles
+kb pdf "https://example.com/document.pdf" --output articles
+```
+
+Text-bearing images become inspectable Markdown with page and geometry metadata while the source image remains available; primarily visual images stay embedded. This matters for hybrid documents such as exported reports whose later pages are really Slack messages, diagrams, or photographs.
 
 The bundle is evidence, not the final interpretation. A maintained note can cite several captures, record disagreement, and change when later evidence warrants it. The captures stay available for audit. This source-versus-synthesis boundary prevents an agent from silently replacing what a page said with what the agent now believes it meant.
 
@@ -99,7 +108,7 @@ A vector score means that two passages occupy a nearby region in an embedding mo
 
 A plan shown only in chat has the same session boundary as the reasoning that produced it. The package's `plan-kb` skill writes the plan as a normal file with an outcome, status, area, assumptions, dependencies, decisions, and a verification method. During execution, the same file accumulates deviations, review findings, command evidence, and the final result. Completed plans remain as history; current operating truth moves into code, documentation, or maintained notes.
 
-CCLRTE/kb ships five Agent Skills with the installed package. `save-url-kb` selects an acquisition route and records completeness. `save-pdf-kb` turns local PDFs into Markdown while preserving native text, image text, visual assets, and file provenance. `query-kb` chooses among exact metadata, graph traversal, and semantic search. `refresh-kb` regenerates the catalog and reviews link diagnostics without manufacturing edges. `plan-kb` keeps execution knowledge durable. Their shared `-kb` suffix makes the skill family easy to scan and invoke consistently. The [agent workflow documentation](<https://github.com/CCLRTE/kb/blob/main/docs/agent-workflow.md>) defines how those skills meet the same CLI contracts across agent runners.
+CCLRTE/kb ships five Agent Skills with the installed package. `save-url-kb` selects an acquisition route and records completeness. `save-pdf-kb` turns local files and public PDF URLs into Markdown while preserving native text, image text, visual assets, original bytes, and source provenance. `query-kb` chooses among exact metadata, graph traversal, and semantic search. `refresh-kb` regenerates the catalog and reviews link diagnostics without manufacturing edges. `plan-kb` keeps execution knowledge durable. Their shared `-kb` suffix makes the skill family easy to scan and invoke consistently. The [agent workflow documentation](<https://github.com/CCLRTE/kb/blob/main/docs/agent-workflow.md>) defines how those skills meet the same CLI contracts across agent runners.
 
 ### Adopt the parts that prevent repeated rediscovery
 
@@ -118,7 +127,7 @@ Copy this prompt into Codex, Claude Code, or another coding agent:
 
 ```text
 Install CCLRTE/kb and its bundled Agent Skills from
-https://github.com/CCLRTE/kb at the immutable v0.3.2 tag. Follow the repository
+https://github.com/CCLRTE/kb at the immutable v0.3.3 tag. Follow the repository
 README, install the `kb` CLI, copy or link the skills I need into this agent
 runner's configured skills directory, and verify the installation with
 `kb doctor` and `kb --help`. Do not initialize or modify a vault until I ask.
@@ -128,10 +137,10 @@ The repository and packed package carry the same skill directories, so an agent
 can inspect the tagged instructions before placing them in its runner-specific
 discovery path.
 
-Install the CLI from the immutable `v0.3.2` tag:
+Install the CLI from the immutable `v0.3.3` tag:
 
 ```sh
-bun add --global github:CCLRTE/kb#v0.3.2
+bun add --global github:CCLRTE/kb#v0.3.3
 kb --help
 ```
 
@@ -140,7 +149,7 @@ For programmatic use, declare the same pinned source in a project:
 ```json
 {
   "dependencies": {
-    "@cclrte/kb": "github:CCLRTE/kb#v0.3.2"
+    "@cclrte/kb": "github:CCLRTE/kb#v0.3.3"
   }
 }
 ```
@@ -178,7 +187,7 @@ kb check --root .
 | `kb init [directory]` | Create a new vault without merging into or overwriting an existing path; the default directory is `kb`. |
 | `kb clip <url\|current>` | Capture a source and write an article bundle. `current` reads an attached active tab without navigating it; `kb capture <url>` is the explicit URL form. |
 | `kb inspect <url>` | Run acquisition and extraction without writing a bundle. |
-| `kb pdf <file> [--slug <slug>]` | Convert a local PDF into Markdown while retaining the original file, extracted images, OCR-derived text, and page provenance. |
+| `kb pdf <file-or-url> [--slug <slug>]` | Convert a local or public remote PDF into Markdown while retaining the original bytes, extracted images, OCR-derived text, URL provenance, and page provenance. |
 | `kb refresh --root <directory>` | Rebuild the managed catalog atomically and report graph findings. |
 | `kb check --root <directory>` | Verify that the catalog is current and that graph policy passes without changing files. |
 | `kb graph --root <directory>` | Print the resolved contextual graph, broken or ambiguous links, orphans, and advisory mention candidates. |
@@ -215,6 +224,7 @@ PDF capture uses the same bundle boundary:
 
 ```sh
 kb pdf "/absolute/path/to/document.pdf" --output articles
+kb pdf "https://example.com/document.pdf" --output articles
 ```
 
 The bundle includes byte-identical `source.pdf`, readable Markdown, `capture.json`, and content-addressed extracted images. A reviewed second pass also retains its hash-bound `annotations.json`. See [Capture PDF documents](docs/pdf.md) for heading inference, OCR, screenshot metadata, completeness, and review.
@@ -229,6 +239,6 @@ The package exports its full programmatic surface from `@cclrte/kb`; focused ent
 
 ## Agent skills
 
-The repository and packed package ship five reusable Agent Skills under `skills/`: `save-url-kb` for auditable web ingestion, `save-pdf-kb` for local PDF conversion, `refresh-kb` for graph maintenance, `query-kb` for choosing exact, structural, keyword, or semantic retrieval, and `plan-kb` for creating and growing durable implementation plans. Copy or link a skill directory into the location used by your agent runner. They invoke the installed `kb` command and do not depend on a repository checkout path.
+The repository and packed package ship five reusable Agent Skills under `skills/`: `save-url-kb` for auditable web ingestion, `save-pdf-kb` for local and public remote PDF conversion, `refresh-kb` for graph maintenance, `query-kb` for choosing exact, structural, keyword, or semantic retrieval, and `plan-kb` for creating and growing durable implementation plans. Copy or link a skill directory into the location used by your agent runner. They invoke the installed `kb` command and do not depend on a repository checkout path.
 
 See [Design](docs/design.md), [Agent workflow](docs/agent-workflow.md), [PDF capture](docs/pdf.md), and [Contributing](CONTRIBUTING.md) for the durable contracts and development gate. CCLRTE/kb is available under the [MIT License](LICENSE).

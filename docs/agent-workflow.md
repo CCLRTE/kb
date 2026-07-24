@@ -99,10 +99,11 @@ Review the Markdown and `capture.json` together. Preserve the recorded status, w
 
 The capture command reads content and writes a local bundle. It does not post, like, follow, send, delete, or submit on the source service.
 
-Capture a local PDF through its separate file-ingestion path:
+Capture a local or public remote PDF through its separate ingestion path:
 
 ```sh
 kb pdf "/absolute/path/to/document.pdf" --output articles
+kb pdf "https://example.com/document.pdf" --output articles
 ```
 
 Review native headings, OCR-derived text, and retained source images together.

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { main } from "./cli.js";
-import type { PdfCaptureOutcome } from "./model.js";
+import type { PdfCaptureOptions, PdfCaptureOutcome } from "./model.js";
 
 function partialOutcome(): PdfCaptureOutcome {
   const manifest: PdfCaptureOutcome["manifest"] = {
@@ -85,5 +85,41 @@ describe("PDF CLI output", () => {
     expect(stdout).toContain("6 of 43 pages processed");
     expect(stdout).not.toContain("; 43 pages;");
     expect(stderr).toContain("PDF extraction stopped at 6 of 43 pages.");
+  });
+
+  test("downloads a remote source, passes URL provenance, and disposes it after capture", async () => {
+    let disposed = false;
+    let received: PdfCaptureOptions | null = null;
+    const exitCode = await main(
+      ["https://example.com/paper.pdf", "--output", "articles", "--quiet"],
+      {},
+      { stdout: () => {}, stderr: () => {} },
+      {
+        preparePdfSource: () => Promise.resolve({
+          inputPath: "/tmp/downloaded.pdf",
+          remoteSource: {
+            requestedUrl: "https://example.com/paper.pdf",
+            finalUrl: "https://cdn.example.com/paper.pdf",
+          },
+          dispose: () => {
+            disposed = true;
+          },
+        }),
+        runPdfCapture: (options) => {
+          received = options;
+          return Promise.resolve(partialOutcome());
+        },
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(received).toMatchObject({
+      inputPath: "/tmp/downloaded.pdf",
+      remoteSource: {
+        requestedUrl: "https://example.com/paper.pdf",
+        finalUrl: "https://cdn.example.com/paper.pdf",
+      },
+    });
+    expect(disposed).toBe(true);
   });
 });

@@ -1,8 +1,8 @@
-export const pdfUsage = `kb pdf — save a local PDF as an auditable Markdown bundle
+export const pdfUsage = `kb pdf — save a local or public remote PDF as an auditable Markdown bundle
 
 Usage:
-  kb pdf <file> [--output <directory>] [--slug <slug>] [--annotations <json>] [--force] [--json]
-  kb pdf save <file> [capture options]
+  kb pdf <file-or-url> [--output <directory>] [--slug <slug>] [--annotations <json>] [--force] [--json]
+  kb pdf save <file-or-url> [capture options]
 
 Capture options:
   --output <directory>          Bundle parent (default: KB_PDF_OUTPUT or kb/articles)
@@ -23,7 +23,7 @@ export type PdfCliArguments =
   | { readonly command: "help" }
   | {
       readonly command: "capture";
-      readonly inputPath: string;
+      readonly input: string;
       readonly outputBase: string;
       readonly slug?: string;
       readonly interpretationsPath?: string;
@@ -170,12 +170,12 @@ export function parsePdfArguments(
     }
   }
 
-  const inputPath = positional[0];
-  if (inputPath === undefined || positional.length !== 1) {
-    return { ok: false, message: "kb pdf requires exactly one local PDF path" };
+  const input = positional[0];
+  if (input === undefined || positional.length !== 1) {
+    return { ok: false, message: "kb pdf requires exactly one PDF path or public URL" };
   }
-  if (inputPath.length > 64 * 1024) {
-    return { ok: false, message: "PDF input path exceeds the 65536 code-unit limit" };
+  if (input.length > 64 * 1024) {
+    return { ok: false, message: "PDF input exceeds the 65536 code-unit limit" };
   }
   if (outputBase.trim() === "") return { ok: false, message: "--output must not be empty" };
   if (slug !== undefined && slug.trim() === "") return { ok: false, message: "--slug must not be empty" };
@@ -184,7 +184,7 @@ export function parsePdfArguments(
     ok: true,
     value: {
       command: "capture",
-      inputPath,
+      input,
       outputBase,
       ...(slug === undefined ? {} : { slug }),
       ...(interpretationsPath === undefined ? {} : { interpretationsPath }),

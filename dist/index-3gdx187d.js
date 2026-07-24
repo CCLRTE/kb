@@ -8,7 +8,11 @@ import {
   yamlString
 } from "./index-hgve9rh2.js";
 import {
-  redactSensitiveText
+  safeFetch
+} from "./index-kvxzb85x.js";
+import {
+  redactSensitiveText,
+  sanitizeArtifactUrl
 } from "./index-ey9rycsn.js";
 import {
   sanitizeTerminalLine,
@@ -19,11 +23,11 @@ import {
 } from "./index-efcktfvv.js";
 
 // src/pdf/args.ts
-var pdfUsage = `kb pdf \u2014 save a local PDF as an auditable Markdown bundle
+var pdfUsage = `kb pdf \u2014 save a local or public remote PDF as an auditable Markdown bundle
 
 Usage:
-  kb pdf <file> [--output <directory>] [--slug <slug>] [--annotations <json>] [--force] [--json]
-  kb pdf save <file> [capture options]
+  kb pdf <file-or-url> [--output <directory>] [--slug <slug>] [--annotations <json>] [--force] [--json]
+  kb pdf save <file-or-url> [capture options]
 
 Capture options:
   --output <directory>          Bundle parent (default: KB_PDF_OUTPUT or kb/articles)
@@ -149,12 +153,12 @@ function parsePdfArguments(rawArguments, environment = {}) {
         maxTotalAssetBytes = parsed;
     }
   }
-  const inputPath = positional[0];
-  if (inputPath === undefined || positional.length !== 1) {
-    return { ok: false, message: "kb pdf requires exactly one local PDF path" };
+  const input = positional[0];
+  if (input === undefined || positional.length !== 1) {
+    return { ok: false, message: "kb pdf requires exactly one PDF path or public URL" };
   }
-  if (inputPath.length > 64 * 1024) {
-    return { ok: false, message: "PDF input path exceeds the 65536 code-unit limit" };
+  if (input.length > 64 * 1024) {
+    return { ok: false, message: "PDF input exceeds the 65536 code-unit limit" };
   }
   if (outputBase.trim() === "")
     return { ok: false, message: "--output must not be empty" };
@@ -164,7 +168,7 @@ function parsePdfArguments(rawArguments, environment = {}) {
     ok: true,
     value: {
       command: "capture",
-      inputPath,
+      input,
       outputBase,
       ...slug === undefined ? {} : { slug },
       ...interpretationsPath === undefined ? {} : { interpretationsPath },
@@ -1368,6 +1372,7 @@ function buildPdfMarkdown(options) {
     `source_type: ${yamlString("pdf")}`,
     `source_original_filename: ${yamlString(options.originalFilename)}`,
     `source_sha256: ${yamlString(options.sourceSha256)}`,
+    ...options.sourceUrl === undefined ? [] : [`source_url: ${yamlString(options.sourceUrl)}`],
     `pages: ${options.metadata.pageCount}`,
     `clipped: ${yamlString(options.capturedDate)}`,
     `capture_status: ${yamlString(options.status)}`,
@@ -1666,6 +1671,7 @@ async function runPdfCapture(options, dependencies = {}) {
       slug,
       originalFilename: inspection.originalFilename,
       sourceSha256: inspection.sourceSha256,
+      ...options.remoteSource === undefined ? {} : { sourceUrl: options.remoteSource.finalUrl },
       capturedDate: capturedAt.slice(0, 10),
       status,
       metadata: inspection.metadata,
@@ -1698,7 +1704,11 @@ async function runPdfCapture(options, dependencies = {}) {
         path: PDF_CAPTURE_SOURCE_FILENAME,
         mimeType: "application/pdf",
         bytes: inspection.sourceBytes,
-        sha256: inspection.sourceSha256
+        sha256: inspection.sourceSha256,
+        ...options.remoteSource === undefined ? {} : {
+          requestedUrl: options.remoteSource.requestedUrl,
+          finalUrl: options.remoteSource.finalUrl
+        }
       },
       document: {
         ...inspection.metadata,
@@ -1753,6 +1763,101 @@ async function runPdfCapture(options, dependencies = {}) {
 // src/pdf/cli.ts
 import { lstatSync as lstatSync3, readFileSync as readFileSync3 } from "fs";
 import { resolve as resolve3 } from "path";
+
+// src/pdf/source.ts
+import {
+  chmodSync as chmodSync3,
+  mkdtempSync as mkdtempSync3,
+  rmSync as rmSync3,
+  writeFileSync as writeFileSync2
+} from "fs";
+import { tmpdir as tmpdir2 } from "os";
+import { basename as basename2, join as join5 } from "path";
+var remoteUserAgent = "CCLRTE-kb/0.3 PDF capture";
+function parseRemoteUrl(input) {
+  if (!/^https?:\/\//iu.test(input))
+    return null;
+  let url;
+  try {
+    url = new URL(input);
+  } catch {
+    throw new Error("PDF URL is invalid");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("PDF URL must use HTTP or HTTPS");
+  }
+  if (url.username !== "" || url.password !== "") {
+    throw new Error("PDF URL must not contain embedded credentials");
+  }
+  return url;
+}
+function remoteFilename(url) {
+  let decoded;
+  try {
+    decoded = decodeURIComponent(basename2(url.pathname));
+  } catch {
+    decoded = "source.pdf";
+  }
+  const normalized = decoded.normalize("NFKC").replace(/[^\p{Letter}\p{Number}._-]+/gu, "-").replace(/^[.-]+|[.-]+$/gu, "").slice(0, 180);
+  const stem = normalized === "" ? "source" : normalized.replace(/\.pdf$/iu, "");
+  return `${stem}.pdf`;
+}
+function assertPdfSignature(bytes) {
+  if (bytes.byteLength < 5 || new TextDecoder().decode(bytes.subarray(0, 5)) !== "%PDF-") {
+    throw new Error("remote PDF input does not have a valid PDF signature");
+  }
+}
+async function preparePdfSource(input, options = {}, dependencies = {}) {
+  const requestedUrl = parseRemoteUrl(input);
+  if (requestedUrl === null) {
+    return {
+      inputPath: input,
+      dispose: () => {}
+    };
+  }
+  const result = await (dependencies.fetch ?? safeFetch)(requestedUrl, {
+    timeoutMs: options.timeoutMs ?? pdfCaptureDefaults.timeoutMs,
+    maxBytes: options.maxPdfBytes ?? pdfCaptureDefaults.maxPdfBytes,
+    allowPrivateNetwork: false,
+    userAgent: remoteUserAgent,
+    accept: "application/pdf,application/octet-stream;q=0.9,*/*;q=0.1",
+    retries: 2,
+    maxRedirects: 5
+  });
+  assertPdfSignature(result.bytes);
+  const makeTemporaryDirectory = dependencies.makeTemporaryDirectory ?? (() => mkdtempSync3(join5(tmpdir2(), "cclrte-kb-pdf-source-")));
+  const removeDirectory = dependencies.removeDirectory ?? ((path) => rmSync3(path, { recursive: true, force: true }));
+  const directory = makeTemporaryDirectory();
+  let disposed = false;
+  const dispose = () => {
+    if (disposed)
+      return;
+    disposed = true;
+    removeDirectory(directory);
+  };
+  try {
+    chmodSync3(directory, 448);
+    const inputPath = join5(directory, remoteFilename(result.finalUrl));
+    (dependencies.writeFile ?? writeFileSync2)(inputPath, result.bytes, {
+      encoding: null,
+      flag: "wx",
+      mode: 384
+    });
+    return {
+      inputPath,
+      remoteSource: {
+        requestedUrl: sanitizeArtifactUrl(requestedUrl.href),
+        finalUrl: sanitizeArtifactUrl(result.finalUrl.href)
+      },
+      dispose
+    };
+  } catch (error) {
+    dispose();
+    throw error;
+  }
+}
+
+// src/pdf/cli.ts
 var defaultOutput = {
   stdout: (value) => process.stdout.write(value),
   stderr: (value) => process.stderr.write(value)
@@ -1811,14 +1916,20 @@ ${sanitizeTerminalText(pdfUsage)}`);
     return 0;
   }
   if (!arguments_.quiet && !arguments_.json) {
-    output.stderr(`Saving PDF ${safe(arguments_.inputPath)} ...
+    output.stderr(`Saving PDF ${safe(arguments_.input)} ...
 `);
   }
+  let preparedSource = null;
   try {
     const interpretations = arguments_.interpretationsPath === undefined ? undefined : (dependencies.readInterpretations ?? readInterpretations)(arguments_.interpretationsPath);
+    preparedSource = await (dependencies.preparePdfSource ?? preparePdfSource)(arguments_.input, {
+      ...arguments_.timeoutMs === undefined ? {} : { timeoutMs: arguments_.timeoutMs },
+      ...arguments_.maxPdfBytes === undefined ? {} : { maxPdfBytes: arguments_.maxPdfBytes }
+    });
     const options = {
-      inputPath: arguments_.inputPath,
+      inputPath: preparedSource.inputPath,
       outputBase: arguments_.outputBase,
+      ...preparedSource.remoteSource === undefined ? {} : { remoteSource: preparedSource.remoteSource },
       ...arguments_.slug === undefined ? {} : { slug: arguments_.slug },
       ...interpretations === undefined ? {} : { interpretations },
       force: arguments_.force,
@@ -1853,6 +1964,8 @@ ${sanitizeTerminalText(pdfUsage)}`);
       output.stderr(`error: ${message}
 `);
     return 1;
+  } finally {
+    preparedSource?.dispose();
   }
 }
 if (false)

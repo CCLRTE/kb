@@ -1,6 +1,6 @@
 {
   "name": "@cclrte/kb",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "A simple Markdown knowledge base for coding agents with local search, auditable capture, and derived backlinks.",
   "license": "MIT",
   "type": "module",
@@ -136,6 +136,7 @@
     "src/pdf/model.ts",
     "src/pdf/ocr.ts",
     "src/pdf/persist.ts",
+    "src/pdf/source.ts",
     "src/pdf/tools.ts",
     "src/query.ts",
     "src/semantic.ts",

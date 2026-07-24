@@ -127,7 +127,7 @@ function manifestImage(image: ResolvedPdfImage): PdfManifestImage {
   };
 }
 
-/** Inspect, OCR/annotate, render, and atomically persist one local PDF source. */
+/** Inspect, OCR/annotate, render, and atomically persist one prepared PDF source. */
 export async function runPdfCapture(
   options: PdfCaptureOptions,
   dependencies: PdfCaptureDependencies = {},
@@ -197,6 +197,7 @@ export async function runPdfCapture(
       slug,
       originalFilename: inspection.originalFilename,
       sourceSha256: inspection.sourceSha256,
+      ...(options.remoteSource === undefined ? {} : { sourceUrl: options.remoteSource.finalUrl }),
       capturedDate: capturedAt.slice(0, 10),
       status,
       metadata: inspection.metadata,
@@ -240,6 +241,12 @@ export async function runPdfCapture(
         mimeType: "application/pdf",
         bytes: inspection.sourceBytes,
         sha256: inspection.sourceSha256,
+        ...(options.remoteSource === undefined
+          ? {}
+          : {
+              requestedUrl: options.remoteSource.requestedUrl,
+              finalUrl: options.remoteSource.finalUrl,
+            }),
       },
       document: {
         ...inspection.metadata,

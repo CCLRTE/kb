@@ -6,6 +6,7 @@ import { sanitizeTerminalLine, sanitizeTerminalText } from "../clip/terminal.js"
 import { parsePdfArguments, pdfUsage } from "./args.js";
 import { runPdfCapture } from "./capture.js";
 import { parsePdfImageInterpretations } from "./layout.js";
+import { preparePdfSource, type PreparedPdfSource } from "./source.js";
 import type {
   PdfCaptureDependencies,
   PdfCaptureOptions,
@@ -27,6 +28,7 @@ export type PdfCliDependencies = {
   readonly runPdfCapture?: typeof runPdfCapture;
   readonly captureDependencies?: PdfCaptureDependencies;
   readonly readInterpretations?: (path: string) => readonly PdfImageInterpretation[];
+  readonly preparePdfSource?: typeof preparePdfSource;
 };
 
 function safe(value: string): string {
@@ -96,15 +98,24 @@ export async function main(
     return 0;
   }
   if (!arguments_.quiet && !arguments_.json) {
-    output.stderr(`Saving PDF ${safe(arguments_.inputPath)} ...\n`);
+    output.stderr(`Saving PDF ${safe(arguments_.input)} ...\n`);
   }
+  let preparedSource: PreparedPdfSource | null = null;
   try {
     const interpretations = arguments_.interpretationsPath === undefined
       ? undefined
       : (dependencies.readInterpretations ?? readInterpretations)(arguments_.interpretationsPath);
+    preparedSource = await (dependencies.preparePdfSource ?? preparePdfSource)(
+      arguments_.input,
+      {
+        ...(arguments_.timeoutMs === undefined ? {} : { timeoutMs: arguments_.timeoutMs }),
+        ...(arguments_.maxPdfBytes === undefined ? {} : { maxPdfBytes: arguments_.maxPdfBytes }),
+      },
+    );
     const options: PdfCaptureOptions = {
-      inputPath: arguments_.inputPath,
+      inputPath: preparedSource.inputPath,
       outputBase: arguments_.outputBase,
+      ...(preparedSource.remoteSource === undefined ? {} : { remoteSource: preparedSource.remoteSource }),
       ...(arguments_.slug === undefined ? {} : { slug: arguments_.slug }),
       ...(interpretations === undefined ? {} : { interpretations }),
       force: arguments_.force,
@@ -140,6 +151,8 @@ export async function main(
     if (arguments_.json) output.stdout(terminalSafeJson({ ok: false, error: message }));
     else output.stderr(`error: ${message}\n`);
     return 1;
+  } finally {
+    preparedSource?.dispose();
   }
 }
 

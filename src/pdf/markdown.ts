@@ -101,6 +101,7 @@ export type BuildPdfMarkdownOptions = {
   readonly slug: string;
   readonly originalFilename: string;
   readonly sourceSha256: string;
+  readonly sourceUrl?: string;
   readonly capturedDate: string;
   readonly status: PdfCaptureStatus;
   readonly metadata: PdfDocumentMetadata;
@@ -125,6 +126,7 @@ export function buildPdfMarkdown(options: BuildPdfMarkdownOptions): {
     `source_type: ${yamlString("pdf")}`,
     `source_original_filename: ${yamlString(options.originalFilename)}`,
     `source_sha256: ${yamlString(options.sourceSha256)}`,
+    ...(options.sourceUrl === undefined ? [] : [`source_url: ${yamlString(options.sourceUrl)}`]),
     `pages: ${options.metadata.pageCount}`,
     `clipped: ${yamlString(options.capturedDate)}`,
     `capture_status: ${yamlString(options.status)}`,

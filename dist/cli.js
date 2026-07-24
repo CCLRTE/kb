@@ -2,7 +2,7 @@
 // @bun
 import {
   main as main2
-} from "./index-fqss83hj.js";
+} from "./index-3gdx187d.js";
 import {
   initVault
 } from "./index-455fqvmn.js";
@@ -53,7 +53,7 @@ Usage:
   kb init [directory] [--json]
   kb clip <url|current> [capture options]
   kb inspect <url> [capture options]
-  kb pdf <file> [PDF options]
+  kb pdf <file-or-url> [PDF options]
   kb refresh [--root <directory>] [--index <path>] [--json]
   kb check [--root <directory>] [--index <path>] [--json]
   kb graph [--root <directory>] [--index <path>] [--json]

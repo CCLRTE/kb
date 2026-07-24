@@ -28,7 +28,7 @@ describe("PDF CLI argument parsing", () => {
       ok: true,
       value: {
         command: "capture",
-        inputPath: "document.pdf",
+        input: "document.pdf",
         outputBase: "vault/articles",
         slug: "durable-document",
         interpretationsPath: "images.json",
@@ -51,7 +51,7 @@ describe("PDF CLI argument parsing", () => {
         ok: true,
         value: {
           command: "capture",
-          inputPath: "document.pdf",
+          input: "document.pdf",
           outputBase: "articles",
           force: false,
           json: false,
@@ -63,7 +63,7 @@ describe("PDF CLI argument parsing", () => {
   test("rejects ambiguous paths, missing option values, and unsafe bounds", () => {
     expect(parsePdfArguments(["one.pdf", "two.pdf"])).toEqual({
       ok: false,
-      message: "kb pdf requires exactly one local PDF path",
+      message: "kb pdf requires exactly one PDF path or public URL",
     });
     expect(parsePdfArguments(["document.pdf", "--slug"])).toEqual({
       ok: false,
@@ -79,6 +79,20 @@ describe("PDF CLI argument parsing", () => {
     expect(parsePdfArguments(["--help"])).toEqual({
       ok: true,
       value: { command: "help" },
+    });
+  });
+
+  test("accepts a public PDF URL", () => {
+    expect(parsePdfArguments(["https://arxiv.org/pdf/2507.09369"])).toEqual({
+      ok: true,
+      value: {
+        command: "capture",
+        input: "https://arxiv.org/pdf/2507.09369",
+        outputBase: "kb/articles",
+        force: false,
+        json: false,
+        quiet: false,
+      },
     });
   });
 });

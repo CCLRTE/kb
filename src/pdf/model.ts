@@ -25,6 +25,11 @@ export type PdfDocumentMetadata = {
   readonly encrypted: boolean;
 };
 
+export type PdfRemoteSource = {
+  readonly requestedUrl: string;
+  readonly finalUrl: string;
+};
+
 export type PdfTextFragment = PdfBounds & {
   readonly text: string;
   readonly fontId: string;
@@ -132,6 +137,8 @@ export type PdfCaptureManifest = {
     readonly mimeType: "application/pdf";
     readonly bytes: number;
     readonly sha256: string;
+    readonly requestedUrl?: string;
+    readonly finalUrl?: string;
   };
   readonly document: PdfDocumentMetadata & {
     readonly processedPages: number;
@@ -161,6 +168,7 @@ export type PdfCaptureManifest = {
 export type PdfCaptureOptions = {
   readonly inputPath: string;
   readonly outputBase: string;
+  readonly remoteSource?: PdfRemoteSource;
   readonly slug?: string;
   readonly force?: boolean;
   readonly interpretations?: readonly PdfImageInterpretation[];
