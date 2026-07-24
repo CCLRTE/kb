@@ -5,7 +5,7 @@ hraness/kb is a simple, local-first command-line tool for an Obsidian-compatible
 The CLI is Bun-first. Refresh, graph navigation, exact metadata queries, and capture do not require a model, an API key, a database, or a hosted service. Semantic search uses a replaceable local QMD index; Markdown remains the source of truth.
 
 <!-- article:a-durable-knowledge-base-is-a-write-path:start -->
-## [A knowledge base for your coding agents](<https://prmte.com/articles/a-durable-knowledge-base-is-a-write-path>)
+## [A knowledge base for your coding agents](<https://hraness.pub/articles/a-durable-knowledge-base-is-a-write-path>)
 
 > Coding agents need memory that survives the chat. hraness/kb keeps it in Markdown and Git, with local search and deterministic structure.
 
@@ -13,7 +13,7 @@ A coding agent can inspect a repository and finish a task, then begin the next s
 
 [hraness/kb is an open-source knowledge base for coding agents](<https://github.com/hraness/kb>). It keeps source records, maintained understanding, plans, and their relationships in ordinary Markdown under Git. Deterministic commands handle exact metadata and links; local semantic search helps when the right note uses different words. The package stays deliberately close to files so a team can change agents, editors, or search tools without migrating its memory.
 
-![Four icon cards show sources flowing into durable memory, linked ideas, and search for reuse by future coding-agent sessions.](<https://prmte.com/article-diagrams/a-durable-knowledge-base-is-a-write-path.light.webp>)
+![Four icon cards show sources flowing into durable memory, linked ideas, and search for reuse by future coding-agent sessions.](<https://hraness.pub/article-diagrams/a-durable-knowledge-base-is-a-write-path.light.webp>)
 
 *hraness/kb turns source material into memory that agents can link and find again.*
 
