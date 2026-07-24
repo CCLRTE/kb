@@ -1,4 +1,4 @@
-# Working in a CCLRTE/kb vault
+# Working in a hraness/kb vault
 
 This guide gives coding agents a conservative workflow for reading and maintaining a vault. The Markdown is the durable record. Tool output, catalogs, backlinks, and mention candidates are views over that record.
 

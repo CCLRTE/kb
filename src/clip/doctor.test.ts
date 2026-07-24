@@ -27,7 +27,7 @@ describe("clip doctor", () => {
         dependencies: {
           defuddle: "^0.19.1",
           "agent-browser": "0.32.3",
-          "@steipete/sweet-cookie": "github:CCLRTE/sweet-cookie#0123456789012345678901234567890123456789",
+          "@steipete/sweet-cookie": "github:hraness/sweet-cookie#0123456789012345678901234567890123456789",
         },
       })],
       [join(consumerRoot, "node_modules", "defuddle", "package.json"), packageManifest("defuddle", "0.19.1")],

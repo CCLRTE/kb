@@ -1,6 +1,6 @@
 # Design
 
-CCLRTE/kb treats a knowledge base as durable Markdown plus replaceable views. A vault must remain useful when the CLI is absent, and a capture must remain inspectable when the original page changes or disappears. Exact graph and metadata views are deterministic; semantic search is optional derived state that can be deleted and rebuilt.
+hraness/kb treats a knowledge base as durable Markdown plus replaceable views. A vault must remain useful when the CLI is absent, and a capture must remain inspectable when the original page changes or disappears. Exact graph and metadata views are deterministic; semantic search is optional derived state that can be deleted and rebuilt.
 
 ## Storage is the interface
 

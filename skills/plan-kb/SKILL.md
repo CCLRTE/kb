@@ -1,6 +1,6 @@
 ---
 name: plan-kb
-description: Create or evolve a durable Markdown plan inside a CCLRTE/kb vault. Use when a user asks for an implementation plan, proposal, RFC, migration plan, execution audit, phased checklist, or an update to an existing plan's decisions, progress, review findings, verification evidence, or final result.
+description: Create or evolve a durable Markdown plan inside a hraness/kb vault. Use when a user asks for an implementation plan, proposal, RFC, migration plan, execution audit, phased checklist, or an update to an existing plan's decisions, progress, review findings, verification evidence, or final result.
 ---
 
 # Write a durable plan
@@ -24,7 +24,7 @@ kb search "the intended outcome" --root "$KB_ROOT" --json
 
 If `kb` is not installed, do not let retrieval tooling block the plan: use
 `rg` or the available file search over `<vault>/plans/`, titles, aliases, and relevant
-terms. If the directory is not an initialized CCLRTE/kb vault, follow the
+terms. If the directory is not an initialized hraness/kb vault, follow the
 repository's existing planning convention instead of initializing one without
 being asked. Semantic search writes only a derived local cache; when that cache
 location is not writable, use exact search or point `XDG_CACHE_HOME` at a
@@ -82,7 +82,7 @@ kb refresh --root "$KB_ROOT"
 kb check --root "$KB_ROOT"
 ```
 
-Run those commands when the plan lives in an initialized CCLRTE/kb vault. In a
+Run those commands when the plan lives in an initialized hraness/kb vault. In a
 repository-native planning directory, use that repository's own validation
 instead. Review broken links first, then inspect orphan and mention advisories
 in context. An independently useful plan may legitimately remain an orphan in

@@ -1,6 +1,6 @@
 # Contributing
 
-Issues and focused pull requests are welcome in the [CCLRTE/kb repository](https://github.com/cclrte/kb).
+Issues and focused pull requests are welcome in the [hraness/kb repository](https://github.com/hraness/kb).
 
 Open an issue before starting a broad command-surface, manifest-schema, adapter, or security-boundary change so compatibility and threat-model expectations can be agreed first.
 

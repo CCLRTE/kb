@@ -264,7 +264,7 @@ describe("capture orchestration", () => {
   });
 
   test("derives the source URL and platform scope from a current attached tab", async () => {
-    const currentUrl = "https://github.com/cclrte/kb/issues/42?view=all";
+    const currentUrl = "https://github.com/hraness/kb/issues/42?view=all";
     const browserPage: AcquiredPage = {
       body: "<main><h1>Current issue</h1><p>Rendered issue body and comments.</p></main>",
       contentType: "text/html",

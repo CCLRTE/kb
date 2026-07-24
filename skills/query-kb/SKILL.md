@@ -1,6 +1,6 @@
 ---
 name: query-kb
-description: Search and navigate a CCLRTE/kb Markdown vault using local semantic retrieval, exact frontmatter and tag filters, deterministic sorting, backlinks, and graph relationships. Use when an agent needs to find prior knowledge, plans, captures, decisions, related notes, or evidence before answering, planning, or changing code.
+description: Search and navigate a hraness/kb Markdown vault using local semantic retrieval, exact frontmatter and tag filters, deterministic sorting, backlinks, and graph relationships. Use when an agent needs to find prior knowledge, plans, captures, decisions, related notes, or evidence before answering, planning, or changing code.
 ---
 
 # Query the knowledge base

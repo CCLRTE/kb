@@ -8,11 +8,11 @@
   "packageManager": "bun@1.3.14",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/CCLRTE/kb.git"
+    "url": "git+https://github.com/hraness/kb.git"
   },
-  "homepage": "https://github.com/CCLRTE/kb#readme",
+  "homepage": "https://github.com/hraness/kb#readme",
   "bugs": {
-    "url": "https://github.com/CCLRTE/kb/issues"
+    "url": "https://github.com/hraness/kb/issues"
   },
   "keywords": [
     "knowledge-base",

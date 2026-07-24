@@ -1,25 +1,25 @@
-# CCLRTE/kb
+# hraness/kb
 
-CCLRTE/kb is a simple, local-first command-line tool for an Obsidian-compatible Markdown knowledge base for coding agents. It keeps notes readable without the tool, queries typed frontmatter, derives a deterministic link graph from explicit wikilinks, offers optional local semantic recall, and captures web and PDF sources as auditable bundles instead of opaque blobs.
+hraness/kb is a simple, local-first command-line tool for an Obsidian-compatible Markdown knowledge base for coding agents. It keeps notes readable without the tool, queries typed frontmatter, derives a deterministic link graph from explicit wikilinks, offers optional local semantic recall, and captures web and PDF sources as auditable bundles instead of opaque blobs.
 
 The CLI is Bun-first. Refresh, graph navigation, exact metadata queries, and capture do not require a model, an API key, a database, or a hosted service. Semantic search uses a replaceable local QMD index; Markdown remains the source of truth.
 
 <!-- article:a-durable-knowledge-base-is-a-write-path:start -->
 ## [A knowledge base for your coding agents](<https://prmte.com/articles/a-durable-knowledge-base-is-a-write-path>)
 
-> Coding agents need memory that survives the chat. CCLRTE/kb keeps it in Markdown and Git, with local search and deterministic structure.
+> Coding agents need memory that survives the chat. hraness/kb keeps it in Markdown and Git, with local search and deterministic structure.
 
 A coding agent can inspect a repository and finish a task, then begin the next session without the decisions, evidence, or rejected approaches that shaped the first one. A longer context window delays that loss. It does not create maintained memory that another agent can inspect and improve.
 
-[CCLRTE/kb is an open-source knowledge base for coding agents](<https://github.com/CCLRTE/kb>). It keeps source records, maintained understanding, plans, and their relationships in ordinary Markdown under Git. Deterministic commands handle exact metadata and links; local semantic search helps when the right note uses different words. The package stays deliberately close to files so a team can change agents, editors, or search tools without migrating its memory.
+[hraness/kb is an open-source knowledge base for coding agents](<https://github.com/hraness/kb>). It keeps source records, maintained understanding, plans, and their relationships in ordinary Markdown under Git. Deterministic commands handle exact metadata and links; local semantic search helps when the right note uses different words. The package stays deliberately close to files so a team can change agents, editors, or search tools without migrating its memory.
 
 ![Four icon cards show sources flowing into durable memory, linked ideas, and search for reuse by future coding-agent sessions.](<https://prmte.com/article-diagrams/a-durable-knowledge-base-is-a-write-path.light.webp>)
 
-*CCLRTE/kb turns source material into memory that agents can link and find again.*
+*hraness/kb turns source material into memory that agents can link and find again.*
 
 The default layout separates authored records from derived views. These directories are useful conventions, not a framework that application code must import:
 
-**Default CCLRTE/kb vault and its derived views**
+**Default hraness/kb vault and its derived views**
 
 ```text
 kb/
@@ -41,7 +41,7 @@ Markdown is the authority in this map. The catalog, backlink view, and semantic 
 
 This design direction did not begin with one recent proposal. Cognition's [2024 Devin release history](<https://docs.devin.ai/release-notes/2024>) described Knowledge that Devin could recall across future sessions by September 2024 and automatic Repo Knowledge from repository scans by November. On April 3, 2025, [Devin 2.0 introduced Devin Wiki and Devin Search](<https://cognition.com/blog/devin-2>). Cognition then launched the public [DeepWiki service on May 5](<https://cognition.com/blog/deepwiki>), followed on May 22 by a [DeepWiki Model Context Protocol server](<https://cognition.com/blog/deepwiki-mcp-server>) for programmatic retrieval. Those products are codebase-oriented and managed by Cognition, but the chronology matters: they predate the later public LLM-wiki discussion.
 
-In April 2026, Andrej Karpathy published an [LLM Wiki proposal](<https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f>) with three layers: raw sources, an agent-maintained Markdown wiki, and an instruction schema. Its operations are ingest, query, and lint, with QMD suggested when the collection outgrows an index file. CCLRTE/kb is not an implementation of Cognition's products, and the similar pieces do not establish direct lineage. They show convergence on the same pressure: useful reasoning must become a durable artifact before a session ends.
+In April 2026, Andrej Karpathy published an [LLM Wiki proposal](<https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f>) with three layers: raw sources, an agent-maintained Markdown wiki, and an instruction schema. Its operations are ingest, query, and lint, with QMD suggested when the collection outgrows an index file. hraness/kb is not an implementation of Cognition's products, and the similar pieces do not establish direct lineage. They show convergence on the same pressure: useful reasoning must become a durable artifact before a session ends.
 
 ### Keep the substrate boring and portable
 
@@ -53,7 +53,7 @@ This low level of opinion has a practical payoff. An agent can start with `index
 
 ### Make ingestion an auditable write path
 
-Durable memory starts with a reliable way to acquire evidence. `kb clip` can read a public URL, saved HTML, a rendered page, or the page already open in a signed-in browser. The [capture documentation](<https://github.com/CCLRTE/kb/blob/main/docs/capture.md>) defines layered extraction routes for ordinary pages and specialized surfaces. Each route reports what it actually obtained rather than treating any nonempty response as a complete capture.
+Durable memory starts with a reliable way to acquire evidence. `kb clip` can read a public URL, saved HTML, a rendered page, or the page already open in a signed-in browser. The [capture documentation](<https://github.com/hraness/kb/blob/main/docs/capture.md>) defines layered extraction routes for ordinary pages and specialized surfaces. Each route reports what it actually obtained rather than treating any nonempty response as a complete capture.
 
 When the useful page is already visible, `kb clip current --browser-live` reads the active tab through the attached browser session. `kb clip current --cdp 9222` uses a browser's Chrome DevTools Protocol port instead. Both use the authentication already present on the machine and read the current document without navigating it. For ingestion, this is the programmatic equivalent of Save Page. A new source surface needs an extractor, representative fixtures, or the generic rendered-page path; it does not need an action API.
 
@@ -91,7 +91,7 @@ The first command finds active browser plans in a reproducible order. The second
 
 ### Let semantic search find language, not truth
 
-Exact structure cannot find a note whose author used an unexpected phrase. For that lane, CCLRTE/kb embeds [QMD, a local search engine for Markdown](<https://github.com/tobi/qmd>). `kb search` defaults to QMD's vector-only search path. It uses the recommended English-optimized `embeddinggemma-300M-Q8_0` model, roughly a 300 MB download, without loading QMD's query-expansion or reranking models. The model and index stay local.
+Exact structure cannot find a note whose author used an unexpected phrase. For that lane, hraness/kb embeds [QMD, a local search engine for Markdown](<https://github.com/tobi/qmd>). `kb search` defaults to QMD's vector-only search path. It uses the recommended English-optimized `embeddinggemma-300M-Q8_0` model, roughly a 300 MB download, without loading QMD's query-expansion or reranking models. The model and index stay local.
 
 **Prewarm the local index and search by meaning**
 
@@ -108,7 +108,7 @@ A vector score means that two passages occupy a nearby region in an embedding mo
 
 A plan shown only in chat has the same session boundary as the reasoning that produced it. The package's `plan-kb` skill writes the plan as a normal file with an outcome, status, area, assumptions, dependencies, decisions, and a verification method. During execution, the same file accumulates deviations, review findings, command evidence, and the final result. Completed plans remain as history; current operating truth moves into code, documentation, or maintained notes.
 
-CCLRTE/kb ships five Agent Skills with the installed package. `save-url-kb` selects an acquisition route and records completeness. `save-pdf-kb` turns local files and public PDF URLs into Markdown while preserving native text, image text, visual assets, original bytes, and source provenance. `query-kb` chooses among exact metadata, graph traversal, and semantic search. `refresh-kb` regenerates the catalog and reviews link diagnostics without manufacturing edges. `plan-kb` keeps execution knowledge durable. Their shared `-kb` suffix makes the skill family easy to scan and invoke consistently. The [agent workflow documentation](<https://github.com/CCLRTE/kb/blob/main/docs/agent-workflow.md>) defines how those skills meet the same CLI contracts across agent runners.
+hraness/kb ships five Agent Skills with the installed package. `save-url-kb` selects an acquisition route and records completeness. `save-pdf-kb` turns local files and public PDF URLs into Markdown while preserving native text, image text, visual assets, original bytes, and source provenance. `query-kb` chooses among exact metadata, graph traversal, and semantic search. `refresh-kb` regenerates the catalog and reviews link diagnostics without manufacturing edges. `plan-kb` keeps execution knowledge durable. Their shared `-kb` suffix makes the skill family easy to scan and invoke consistently. The [agent workflow documentation](<https://github.com/hraness/kb/blob/main/docs/agent-workflow.md>) defines how those skills meet the same CLI contracts across agent runners.
 
 ### Adopt the parts that prevent repeated rediscovery
 
@@ -126,8 +126,8 @@ The limits are equally modular. Capture records what a selected surface exposed;
 Copy this prompt into Codex, Claude Code, or another coding agent:
 
 ```text
-Install CCLRTE/kb and its bundled Agent Skills from
-https://github.com/CCLRTE/kb at the immutable v0.3.3 tag. Follow the repository
+Install hraness/kb and its bundled Agent Skills from
+https://github.com/hraness/kb at the immutable v0.3.3 tag. Follow the repository
 README, install the `kb` CLI, copy or link the skills I need into this agent
 runner's configured skills directory, and verify the installation with
 `kb doctor` and `kb --help`. Do not initialize or modify a vault until I ask.
@@ -140,7 +140,7 @@ discovery path.
 Install the CLI from the immutable `v0.3.3` tag:
 
 ```sh
-bun add --global github:CCLRTE/kb#v0.3.3
+bun add --global github:hraness/kb#v0.3.3
 kb --help
 ```
 
@@ -149,7 +149,7 @@ For programmatic use, declare the same pinned source in a project:
 ```json
 {
   "dependencies": {
-    "@cclrte/kb": "github:CCLRTE/kb#v0.3.3"
+    "@cclrte/kb": "github:hraness/kb#v0.3.3"
   }
 }
 ```
@@ -157,7 +157,7 @@ For programmatic use, declare the same pinned source in a project:
 Contributors can install from a checkout instead:
 
 ```sh
-git clone https://github.com/CCLRTE/kb.git
+git clone https://github.com/hraness/kb.git
 cd kb
 bun install --frozen-lockfile
 bun link
@@ -241,4 +241,4 @@ The package exports its full programmatic surface from `@cclrte/kb`; focused ent
 
 The repository and packed package ship five reusable Agent Skills under `skills/`: `save-url-kb` for auditable web ingestion, `save-pdf-kb` for local and public remote PDF conversion, `refresh-kb` for graph maintenance, `query-kb` for choosing exact, structural, keyword, or semantic retrieval, and `plan-kb` for creating and growing durable implementation plans. Copy or link a skill directory into the location used by your agent runner. They invoke the installed `kb` command and do not depend on a repository checkout path.
 
-See [Design](docs/design.md), [Agent workflow](docs/agent-workflow.md), [PDF capture](docs/pdf.md), and [Contributing](CONTRIBUTING.md) for the durable contracts and development gate. CCLRTE/kb is available under the [MIT License](LICENSE).
+See [Design](docs/design.md), [Agent workflow](docs/agent-workflow.md), [PDF capture](docs/pdf.md), and [Contributing](CONTRIBUTING.md) for the durable contracts and development gate. hraness/kb is available under the [MIT License](LICENSE).

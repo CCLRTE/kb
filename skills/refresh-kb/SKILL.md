@@ -1,6 +1,6 @@
 ---
 name: refresh-kb
-description: Refresh and validate a CCLRTE/kb Markdown vault after notes are added, renamed, moved, or materially revised. Use when an agent needs to update the managed catalog, inspect broken or ambiguous wikilinks, review contextual orphans and unlinked title or alias mentions, repair high-confidence semantic connections, or complete a vault health check.
+description: Refresh and validate a hraness/kb Markdown vault after notes are added, renamed, moved, or materially revised. Use when an agent needs to update the managed catalog, inspect broken or ambiguous wikilinks, review contextual orphans and unlinked title or alias mentions, repair high-confidence semantic connections, or complete a vault health check.
 ---
 
 # Refresh a knowledge base
