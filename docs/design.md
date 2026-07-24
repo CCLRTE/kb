@@ -103,7 +103,7 @@ These boundaries are not entitlement mechanisms. Capture does not bypass authent
 
 [Bun](https://bun.sh) is the required runtime. [YAML](https://eemeli.org/yaml/) parses typed frontmatter, and [QMD](https://github.com/tobi/qmd) supplies the optional local keyword and embedding index. QMD is loaded only by index and search commands, so deterministic graph and metadata commands do not initialize its native runtime or model.
 
-[Defuddle](https://github.com/kepano/defuddle) performs article extraction. [agent-browser](https://github.com/vercel-labs/agent-browser) provides optional rendered acquisition. CCLRTE's pinned [Sweet Cookie safety fork](https://github.com/CCLRTE/sweet-cookie) supports explicit browser-cookie import while retaining host-only scope and rejecting partitioned or container-scoped state that the capture lanes cannot replay faithfully.
+[Defuddle](https://github.com/kepano/defuddle) performs article extraction. [agent-browser](https://github.com/vercel-labs/agent-browser) provides optional rendered acquisition. The pinned [Sweet Cookie safety fork](https://github.com/hraness/sweet-cookie) supports explicit browser-cookie import while retaining host-only scope and rejecting partitioned or container-scoped state that the capture lanes cannot replay faithfully.
 
 [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [FFmpeg](https://ffmpeg.org) remain optional because only full audio or video localization needs them. `kb doctor` reports what is installed without probing cookie stores, and `kb adapters` reports the installed platform claims. A missing optional capability narrows the available route; it does not change the storage or graph model.
 
