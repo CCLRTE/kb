@@ -87,6 +87,66 @@ test("maps a selected Chromium profile into an isolated Default user-data copy",
   }
 });
 
+test("prefers a selected profile's parent Local State over nested user-data decoys", () => {
+  const directory = mkdtempSync(join(tmpdir(), "kb-chromium-selected-profile-clone-"));
+  chmodSync(directory, 0o700);
+  try {
+    const userData = join(directory, "Arc User Data");
+    const parentDefault = join(userData, "Default");
+    const source = join(userData, "Profile 1");
+    const nestedDefault = join(source, "Default");
+    const privateRoot = join(directory, "private");
+    mkdirSync(parentDefault, { recursive: true });
+    mkdirSync(nestedDefault, { recursive: true });
+    mkdirSync(privateRoot, { mode: 0o700 });
+    writeFileSync(join(userData, "Local State"), '{"source":"parent-browser-root"}', { mode: 0o600 });
+    writeFileSync(join(parentDefault, "Cookies"), "parent-default-cookies", { mode: 0o600 });
+    writeFileSync(join(source, "Local State"), '{"source":"nested-decoy"}', { mode: 0o600 });
+    writeFileSync(join(source, "Cookies"), "selected-profile-cookies", { mode: 0o600 });
+    writeFileSync(join(nestedDefault, "Cookies"), "nested-decoy-cookies", { mode: 0o600 });
+
+    const cloned = cloneBrowserProfile(realpathSync(source), privateRoot);
+
+    expect(cloned).toEqual({
+      userDataPath: join(privateRoot, "profile-user-data"),
+      profileDirectory: "Default",
+    });
+    expect(readFileSync(join(cloned.userDataPath, "Local State"), "utf8")).toBe(
+      '{"source":"parent-browser-root"}',
+    );
+    expect(readFileSync(join(cloned.userDataPath, "Default", "Cookies"), "utf8")).toBe(
+      "selected-profile-cookies",
+    );
+    expect(readFileSync(join(cloned.userDataPath, "Default", "Default", "Cookies"), "utf8")).toBe(
+      "nested-decoy-cookies",
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("refuses a Chromium user-data root while its browser process lock is present", () => {
+  const directory = mkdtempSync(join(tmpdir(), "kb-chromium-active-profile-clone-"));
+  chmodSync(directory, 0o700);
+  try {
+    const userData = join(directory, "Arc User Data");
+    const source = join(userData, "Profile 1");
+    const privateRoot = join(directory, "private");
+    mkdirSync(source, { recursive: true });
+    mkdirSync(privateRoot, { mode: 0o700 });
+    writeFileSync(join(userData, "Local State"), '{"source":"parent-browser-root"}', { mode: 0o600 });
+    writeFileSync(join(userData, "SingletonLock"), "active", { mode: 0o600 });
+    writeFileSync(join(source, "Cookies"), "selected-profile-cookies", { mode: 0o600 });
+
+    expect(() => cloneBrowserProfile(realpathSync(source), privateRoot)).toThrow(
+      "Chromium profile is active or retains a stale process lock; fully quit the browser and retry",
+    );
+    expect(existsSync(join(privateRoot, "profile-user-data"))).toBeFalse();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("maps a Chromium user-data root to its isolated Default profile", () => {
   const directory = mkdtempSync(join(tmpdir(), "kb-chromium-root-clone-"));
   chmodSync(directory, 0o700);

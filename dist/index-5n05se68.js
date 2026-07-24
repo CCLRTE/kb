@@ -185,6 +185,17 @@ function localStateEntry(path) {
     throw new BrowserProfileSnapshotError("Chromium Local State is unavailable or unsafe");
   }
 }
+function assertChromiumUserDataIdle(userDataRoot) {
+  let names;
+  try {
+    names = readdirSync(userDataRoot);
+  } catch {
+    throw new BrowserProfileSnapshotError("Chromium user-data root could not be inspected");
+  }
+  if (names.some((name) => name.startsWith("Singleton") || name === "DevToolsActivePort")) {
+    throw new BrowserProfileSnapshotError("Chromium profile is active or retains a stale process lock; fully quit the browser and retry");
+  }
+}
 function copyBoundedLocalState(source, destination) {
   const entry = localStateEntry(source);
   if (entry === null || entry.isSymbolicLink() || !entry.isFile()) {
@@ -245,12 +256,18 @@ function copyBoundedLocalState(source, destination) {
   }
 }
 function cloneBrowserProfile(source, privateDirectory) {
-  const rootLocalState = join(source, "Local State");
-  const rootStateEntry = localStateEntry(rootLocalState);
   let selectedSource = source;
-  let localState = join(dirname(source), "Local State");
+  let userDataRoot = dirname(source);
+  let localState = join(userDataRoot, "Local State");
   let stateEntry = localStateEntry(localState);
-  if (rootStateEntry !== null) {
+  if (stateEntry === null) {
+    const rootLocalState = join(source, "Local State");
+    const rootStateEntry = localStateEntry(rootLocalState);
+    if (rootStateEntry === null) {
+      const destination = join(privateDirectory, "profile");
+      cloneProfile(source, destination);
+      return { userDataPath: destination };
+    }
     const defaultProfile = join(source, "Default");
     let defaultEntry;
     try {
@@ -262,13 +279,9 @@ function cloneBrowserProfile(source, privateDirectory) {
       throw new BrowserProfileSnapshotError("Chromium Default profile must be one real directory");
     }
     selectedSource = defaultProfile;
+    userDataRoot = source;
     localState = rootLocalState;
     stateEntry = rootStateEntry;
-  }
-  if (stateEntry === null) {
-    const destination = join(privateDirectory, "profile");
-    cloneProfile(source, destination);
-    return { userDataPath: destination };
   }
   if (stateEntry.isSymbolicLink() || !stateEntry.isFile()) {
     throw new BrowserProfileSnapshotError("Chromium Local State must be one regular file");
@@ -276,6 +289,7 @@ function cloneBrowserProfile(source, privateDirectory) {
   if (stateEntry.size > maxLocalStateBytes) {
     throw new BrowserProfileSnapshotError("Chromium Local State exceeds its safety bound");
   }
+  assertChromiumUserDataIdle(userDataRoot);
   const userData = join(privateDirectory, "profile-user-data");
   mkdirSync(userData, { mode: 448 });
   chmodSync(userData, 448);

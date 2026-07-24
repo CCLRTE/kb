@@ -9,7 +9,7 @@ import {
 } from "./index-809x6ffw.js";
 import {
   cloneBrowserProfile
-} from "./index-k3pqw1a7.js";
+} from "./index-5n05se68.js";
 import {
   adapterCapabilities,
   inspectClipEnvironment,

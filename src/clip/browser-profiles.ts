@@ -236,6 +236,20 @@ function localStateEntry(path: string): Stats | null {
   }
 }
 
+function assertChromiumUserDataIdle(userDataRoot: string): void {
+  let names: string[];
+  try {
+    names = readdirSync(userDataRoot);
+  } catch {
+    throw new BrowserProfileSnapshotError("Chromium user-data root could not be inspected");
+  }
+  if (names.some((name) => name.startsWith("Singleton") || name === "DevToolsActivePort")) {
+    throw new BrowserProfileSnapshotError(
+      "Chromium profile is active or retains a stale process lock; fully quit the browser and retry",
+    );
+  }
+}
+
 /** Copy Chromium encryption metadata without following links or exceeding the byte bound. */
 export function copyBoundedLocalState(source: string, destination: string): void {
   const entry = localStateEntry(source);
@@ -309,12 +323,18 @@ export type ClonedBrowserProfile = {
 
 /** Clone one selected profile while retaining Chromium's local encryption metadata. */
 export function cloneBrowserProfile(source: string, privateDirectory: string): ClonedBrowserProfile {
-  const rootLocalState = join(source, "Local State");
-  const rootStateEntry = localStateEntry(rootLocalState);
   let selectedSource = source;
-  let localState = join(dirname(source), "Local State");
+  let userDataRoot = dirname(source);
+  let localState = join(userDataRoot, "Local State");
   let stateEntry = localStateEntry(localState);
-  if (rootStateEntry !== null) {
+  if (stateEntry === null) {
+    const rootLocalState = join(source, "Local State");
+    const rootStateEntry = localStateEntry(rootLocalState);
+    if (rootStateEntry === null) {
+      const destination = join(privateDirectory, "profile");
+      cloneProfile(source, destination);
+      return { userDataPath: destination };
+    }
     const defaultProfile = join(source, "Default");
     let defaultEntry: Stats;
     try {
@@ -326,13 +346,9 @@ export function cloneBrowserProfile(source: string, privateDirectory: string): C
       throw new BrowserProfileSnapshotError("Chromium Default profile must be one real directory");
     }
     selectedSource = defaultProfile;
+    userDataRoot = source;
     localState = rootLocalState;
     stateEntry = rootStateEntry;
-  }
-  if (stateEntry === null) {
-    const destination = join(privateDirectory, "profile");
-    cloneProfile(source, destination);
-    return { userDataPath: destination };
   }
   if (stateEntry.isSymbolicLink() || !stateEntry.isFile()) {
     throw new BrowserProfileSnapshotError("Chromium Local State must be one regular file");
@@ -340,6 +356,7 @@ export function cloneBrowserProfile(source: string, privateDirectory: string): C
   if (stateEntry.size > maxLocalStateBytes) {
     throw new BrowserProfileSnapshotError("Chromium Local State exceeds its safety bound");
   }
+  assertChromiumUserDataIdle(userDataRoot);
   const userData = join(privateDirectory, "profile-user-data");
   mkdirSync(userData, { mode: 0o700 });
   chmodSync(userData, 0o700);
