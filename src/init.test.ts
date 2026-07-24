@@ -14,7 +14,7 @@ afterEach(() => {
 
 describe("vault initialization", () => {
   test("creates an agent-ready empty vault that passes graph checks", async () => {
-    const parent = mkdtempSync(join(tmpdir(), "cclrte-kb-init-test-"));
+    const parent = mkdtempSync(join(tmpdir(), "cclrte-info-init-test-"));
     roots.push(parent);
     const root = join(parent, "knowledge");
     const result = await initVault(root);
@@ -28,14 +28,14 @@ describe("vault initialization", () => {
     const rootGuide = readFileSync(join(root, "AGENTS.md"), "utf8");
     const planGuide = readFileSync(join(root, "plans/AGENTS.md"), "utf8");
     expect(rootGuide).toContain("# Guidelines");
-    expect(rootGuide).toContain("kb search");
+    expect(rootGuide).toContain("info search");
     expect(planGuide).toContain("type: plan");
     expect(planGuide).toContain("verification");
     expect(planGuide).toContain("same file");
   });
 
   test("refuses to merge into an existing directory", async () => {
-    const parent = mkdtempSync(join(tmpdir(), "cclrte-kb-init-existing-test-"));
+    const parent = mkdtempSync(join(tmpdir(), "cclrte-info-init-existing-test-"));
     roots.push(parent);
     const root = join(parent, "knowledge");
     await initVault(root);

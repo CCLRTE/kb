@@ -22,7 +22,7 @@ function captureOutput(): {
   };
 }
 
-describe("kb argument parsing", () => {
+describe("info argument parsing", () => {
   test("delegates capture commands and rejects secret-shaped unknown values without echoing them", () => {
     expect(parseArguments(["clip", "https://example.com"])).toEqual({
       ok: true,
@@ -199,9 +199,9 @@ describe("kb argument parsing", () => {
   });
 });
 
-describe("kb vault commands", () => {
+describe("info vault commands", () => {
   test("initializes, refreshes, checks, graphs, and derives backlinks without editing notes", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "cclrte-kb-cli-"));
+    const temporary = await mkdtemp(join(tmpdir(), "cclrte-info-cli-"));
     const vault = join(temporary, "vault");
     try {
       const initOutput = captureOutput();
@@ -374,7 +374,7 @@ describe("kb vault commands", () => {
   });
 
   test("reports broken links as check failures and sanitizes thrown terminal text", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "cclrte-kb-cli-"));
+    const temporary = await mkdtemp(join(tmpdir(), "cclrte-info-cli-"));
     try {
       await writeFile(join(temporary, "index.md"), "# Index\n", "utf8");
       await writeFile(join(temporary, "note.md"), "# Note\n\n[[missing]]\n", "utf8");

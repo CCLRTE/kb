@@ -1,7 +1,7 @@
 // @bun
 import {
   initVault
-} from "./index-455fqvmn.js";
+} from "./index-6vg36apr.js";
 import {
   defaultIgnoredDirectories,
   indexSemanticVault,
@@ -12,7 +12,7 @@ import {
   scanVault,
   searchSemanticVault,
   semanticDatabasePath
-} from "./index-pv4kaje4.js";
+} from "./index-b9zqxdyw.js";
 import {
   analyzeVault,
   catalogEnd,
@@ -25,7 +25,7 @@ import {
   replaceCatalog,
   searchableMarkdown,
   wikiLinks
-} from "./index-p9485vbq.js";
+} from "./index-dq5gjkcp.js";
 import {
   navigateLinks
 } from "./index-9w6m3y9a.js";

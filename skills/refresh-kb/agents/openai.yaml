@@ -1,4 +1,0 @@
-interface:
-  display_name: "Refresh KB"
-  short_description: "Refresh and validate a Markdown knowledge graph"
-  default_prompt: "Use $refresh-kb to refresh this knowledge base, review graph advisories, and run the final check."

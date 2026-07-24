@@ -1,6 +1,6 @@
 {
-  "name": "@cclrte/kb",
-  "version": "0.3.3",
+  "name": "@cclrte/info",
+  "version": "0.4.0",
   "description": "A simple Markdown knowledge base for coding agents with local search, auditable capture, and derived backlinks.",
   "license": "MIT",
   "type": "module",
@@ -8,11 +8,11 @@
   "packageManager": "bun@1.3.14",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/hraness/kb.git"
+    "url": "git+https://github.com/hraness/info.git"
   },
-  "homepage": "https://github.com/hraness/kb#readme",
+  "homepage": "https://github.com/hraness/info#readme",
   "bugs": {
-    "url": "https://github.com/hraness/kb/issues"
+    "url": "https://github.com/hraness/info/issues"
   },
   "keywords": [
     "knowledge-base",
@@ -95,7 +95,7 @@
     }
   },
   "bin": {
-    "kb": "./dist/cli.js"
+    "info": "./dist/cli.js"
   },
   "main": "./dist/index.js",
   "types": "./src/index.ts",

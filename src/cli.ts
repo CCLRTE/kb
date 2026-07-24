@@ -45,25 +45,25 @@ const defaultOutput: Output = {
   stderr: (value) => process.stderr.write(value),
 };
 
-export const usage = `kb — auditable capture and derived links for Markdown vaults
+export const usage = `info — auditable capture and derived links for Markdown vaults
 
 Usage:
-  kb init [directory] [--json]
-  kb clip <url|current> [capture options]
-  kb inspect <url> [capture options]
-  kb pdf <file-or-url> [PDF options]
-  kb refresh [--root <directory>] [--index <path>] [--json]
-  kb check [--root <directory>] [--index <path>] [--json]
-  kb graph [--root <directory>] [--index <path>] [--json]
-  kb backlinks <note> [--root <directory>] [--index <path>] [--json]
-  kb links <note> [--root <directory>] [--direction <in|out|both>] [--depth <count>] [--limit <count>] [--json]
-  kb list [--root <directory>] [--where <path=value>] [--has <path>] [--tag <tag>] [--sort <field>] [--order <asc|desc>] [--limit <count>] [--json]
-  kb index [--root <directory>] [--database <path>] [--force] [--json]
-  kb search <query> [--root <directory>] [--database <path>] [--mode <semantic|keyword>] [--limit <count>] [--min-score <score>] [--json]
-  kb doctor [--json]
-  kb adapters [--json]
+  info init [directory] [--json]
+  info clip <url|current> [capture options]
+  info inspect <url> [capture options]
+  info pdf <file-or-url> [PDF options]
+  info refresh [--root <directory>] [--index <path>] [--json]
+  info check [--root <directory>] [--index <path>] [--json]
+  info graph [--root <directory>] [--index <path>] [--json]
+  info backlinks <note> [--root <directory>] [--index <path>] [--json]
+  info links <note> [--root <directory>] [--direction <in|out|both>] [--depth <count>] [--limit <count>] [--json]
+  info list [--root <directory>] [--where <path=value>] [--has <path>] [--tag <tag>] [--sort <field>] [--order <asc|desc>] [--limit <count>] [--json]
+  info index [--root <directory>] [--database <path>] [--force] [--json]
+  info search <query> [--root <directory>] [--database <path>] [--mode <semantic|keyword>] [--limit <count>] [--min-score <score>] [--json]
+  info doctor [--json]
+  info adapters [--json]
 
-Run \`kb clip --help\` for web capture options or \`kb pdf --help\` for PDF conversion options.
+Run \`info clip --help\` for web capture options or \`info pdf --help\` for PDF conversion options.
 `;
 
 type VaultCommand = "refresh" | "check" | "graph" | "backlinks" | "links";
@@ -457,7 +457,7 @@ export function parseArguments(arguments_: readonly string[]): ParseResult {
     return { ok: true, value: { kind: "clip", arguments: arguments_ } };
   }
   if (command === "init") {
-    let directory = "kb";
+    let directory = "info";
     let json = false;
     const positional: string[] = [];
     for (const argument of arguments_.slice(1)) {

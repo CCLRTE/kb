@@ -9,55 +9,55 @@
     "moduleResolution": "Bundler",
     "moduleDetection": "force",
     "paths": {
-      "@cclrte/kb": [
+      "@cclrte/info": [
         "./src/index.ts"
       ],
-      "@cclrte/kb/browser-profiles": [
+      "@cclrte/info/browser-profiles": [
         "./src/clip/browser-profiles.ts"
       ],
-      "@cclrte/kb/capture": [
+      "@cclrte/info/capture": [
         "./src/capture.ts"
       ],
-      "@cclrte/kb/clip/acquire": [
+      "@cclrte/info/clip/acquire": [
         "./src/clip/acquire.ts"
       ],
-      "@cclrte/kb/clip/args": [
+      "@cclrte/info/clip/args": [
         "./src/clip/args.ts"
       ],
-      "@cclrte/kb/clip/bounded-byte-buffer": [
+      "@cclrte/info/clip/bounded-byte-buffer": [
         "./src/clip/bounded-byte-buffer.ts"
       ],
-      "@cclrte/kb/clip/cli": [
+      "@cclrte/info/clip/cli": [
         "./src/clip/cli.ts"
       ],
-      "@cclrte/kb/clip/doctor": [
+      "@cclrte/info/clip/doctor": [
         "./src/clip/doctor.ts"
       ],
-      "@cclrte/kb/clip/network": [
+      "@cclrte/info/clip/network": [
         "./src/clip/network.ts"
       ],
-      "@cclrte/kb/clip/network-proxy": [
+      "@cclrte/info/clip/network-proxy": [
         "./src/clip/network-proxy.ts"
       ],
-      "@cclrte/kb/clip/persist": [
+      "@cclrte/info/clip/persist": [
         "./src/clip/persist.ts"
       ],
-      "@cclrte/kb/clip/terminal": [
+      "@cclrte/info/clip/terminal": [
         "./src/clip/terminal.ts"
       ],
-      "@cclrte/kb/graph": [
+      "@cclrte/info/graph": [
         "./src/graph.ts"
       ],
-      "@cclrte/kb/navigation": [
+      "@cclrte/info/navigation": [
         "./src/navigation.ts"
       ],
-      "@cclrte/kb/pdf": [
+      "@cclrte/info/pdf": [
         "./src/pdf.ts"
       ],
-      "@cclrte/kb/query": [
+      "@cclrte/info/query": [
         "./src/query.ts"
       ],
-      "@cclrte/kb/semantic": [
+      "@cclrte/info/semantic": [
         "./src/semantic.ts"
       ]
     },

@@ -15,12 +15,12 @@ title: Knowledge base
 
 This vault keeps captured sources separate from maintained notes. Catalog links are navigation; contextual links belong in prose when they help a reader follow a real relationship.
 
-<!-- kb:catalog:start -->
+<!-- info:catalog:start -->
 ## Note catalog
 
 _No durable notes have been filed yet._
 
-<!-- kb:catalog:end -->
+<!-- info:catalog:end -->
 `,
   "AGENTS.md": `# Contents
 
@@ -36,8 +36,8 @@ _No durable notes have been filed yet._
 - Use vault-root wikilinks without \`.md\`, such as \`[[notes/context-engineering|context engineering]]\`.
 - Put links in explanatory prose when they carry part of the argument. Do not add bare reciprocal links to improve graph counts.
 - Preserve source authority: article bodies are captures, riffs retain the speaker's claims, and maintained notes own later synthesis.
-- Run \`kb refresh --root .\` after changing notes, inspect advisory link candidates, then run \`kb check --root .\`.
-- Use \`kb list\` for exact metadata or tag questions, \`kb links\` for explicit relationships, and \`kb search\` when the concept may use different words.
+- Run \`info refresh --root .\` after changing notes, inspect advisory link candidates, then run \`info check --root .\`.
+- Use \`info list\` for exact metadata or tag questions, \`info links\` for explicit relationships, and \`info search\` when the concept may use different words.
 `,
   "articles/AGENTS.md": `# Contents
 

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Query a Knowledge Base"
-  short_description: "Search meaning, metadata, and note relationships"
-  default_prompt: "Use $query-kb to find and structurally navigate the relevant knowledge-base notes."

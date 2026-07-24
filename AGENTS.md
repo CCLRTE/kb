@@ -2,11 +2,11 @@
 
 - `src/` – deterministic vault graph, typed metadata queries, structural navigation, optional local semantic search, initialization, CLI, capture, and diagnostic code with colocated tests.
 - `dist/` – committed Bun-targeted ESM entrypoints and the compiled Defuddle worker.
-- `skills/save-url-kb/` – reusable agent workflow for bounded, auditable source capture.
-- `skills/save-pdf-kb/` – reusable agent workflow for converting local PDFs into auditable Markdown bundles.
-- `skills/refresh-kb/` – reusable agent workflow for refreshing the catalog and reviewing graph findings.
-- `skills/query-kb/` – reusable agent workflow for choosing exact metadata, graph, keyword, or semantic retrieval.
-- `skills/plan-kb/` – reusable agent workflow for creating and growing durable implementation plans.
+- `skills/save-url-info/` – reusable agent workflow for bounded, auditable source capture.
+- `skills/save-pdf-info/` – reusable agent workflow for converting local PDFs into auditable Markdown bundles.
+- `skills/refresh-info/` – reusable agent workflow for refreshing the catalog and reviewing graph findings.
+- `skills/query-info/` – reusable agent workflow for choosing exact metadata, graph, keyword, or semantic retrieval.
+- `skills/plan-info/` – reusable agent workflow for creating and growing durable implementation plans.
 - `docs/` – design, capture, and agent-workflow documentation.
 - `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, and `LICENSE` – public usage, project policy, threat model, and terms.
 - `package.json`, `tsconfig.json`, and `bun.lock` – standalone package and frozen verification configuration.

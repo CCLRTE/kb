@@ -2,19 +2,19 @@
 // @bun
 import {
   main as main2
-} from "./index-3gdx187d.js";
+} from "./index-6a42wx1p.js";
 import {
   initVault
-} from "./index-455fqvmn.js";
+} from "./index-6vg36apr.js";
 import {
   indexSemanticVault,
   refreshVault,
   scanVault,
   searchSemanticVault
-} from "./index-pv4kaje4.js";
+} from "./index-b9zqxdyw.js";
 import {
   lookupNote
-} from "./index-p9485vbq.js";
+} from "./index-dq5gjkcp.js";
 import {
   navigateLinks
 } from "./index-9w6m3y9a.js";
@@ -23,12 +23,12 @@ import {
 } from "./index-m4bexhht.js";
 import {
   main
-} from "./index-3hnmcaze.js";
+} from "./index-9qxxg9qp.js";
 import"./index-809x6ffw.js";
 import"./index-5n05se68.js";
-import"./index-3t4ef3h7.js";
-import"./index-yhcj5308.js";
-import"./index-k4cczfgz.js";
+import"./index-bjmvvmnj.js";
+import"./index-2mpx0h4p.js";
+import"./index-11gveg0r.js";
 import"./index-hgve9rh2.js";
 import"./index-kvxzb85x.js";
 import {
@@ -38,7 +38,7 @@ import {
   sanitizeTerminalLine,
   sanitizeTerminalText
 } from "./index-1xxnjn0d.js";
-import"./index-6g2pv9d2.js";
+import"./index-0d3p9w68.js";
 import"./index-efcktfvv.js";
 
 // src/cli.ts
@@ -47,25 +47,25 @@ var defaultOutput = {
   stdout: (value) => process.stdout.write(value),
   stderr: (value) => process.stderr.write(value)
 };
-var usage = `kb \u2014 auditable capture and derived links for Markdown vaults
+var usage = `info \u2014 auditable capture and derived links for Markdown vaults
 
 Usage:
-  kb init [directory] [--json]
-  kb clip <url|current> [capture options]
-  kb inspect <url> [capture options]
-  kb pdf <file-or-url> [PDF options]
-  kb refresh [--root <directory>] [--index <path>] [--json]
-  kb check [--root <directory>] [--index <path>] [--json]
-  kb graph [--root <directory>] [--index <path>] [--json]
-  kb backlinks <note> [--root <directory>] [--index <path>] [--json]
-  kb links <note> [--root <directory>] [--direction <in|out|both>] [--depth <count>] [--limit <count>] [--json]
-  kb list [--root <directory>] [--where <path=value>] [--has <path>] [--tag <tag>] [--sort <field>] [--order <asc|desc>] [--limit <count>] [--json]
-  kb index [--root <directory>] [--database <path>] [--force] [--json]
-  kb search <query> [--root <directory>] [--database <path>] [--mode <semantic|keyword>] [--limit <count>] [--min-score <score>] [--json]
-  kb doctor [--json]
-  kb adapters [--json]
+  info init [directory] [--json]
+  info clip <url|current> [capture options]
+  info inspect <url> [capture options]
+  info pdf <file-or-url> [PDF options]
+  info refresh [--root <directory>] [--index <path>] [--json]
+  info check [--root <directory>] [--index <path>] [--json]
+  info graph [--root <directory>] [--index <path>] [--json]
+  info backlinks <note> [--root <directory>] [--index <path>] [--json]
+  info links <note> [--root <directory>] [--direction <in|out|both>] [--depth <count>] [--limit <count>] [--json]
+  info list [--root <directory>] [--where <path=value>] [--has <path>] [--tag <tag>] [--sort <field>] [--order <asc|desc>] [--limit <count>] [--json]
+  info index [--root <directory>] [--database <path>] [--force] [--json]
+  info search <query> [--root <directory>] [--database <path>] [--mode <semantic|keyword>] [--limit <count>] [--min-score <score>] [--json]
+  info doctor [--json]
+  info adapters [--json]
 
-Run \`kb clip --help\` for web capture options or \`kb pdf --help\` for PDF conversion options.
+Run \`info clip --help\` for web capture options or \`info pdf --help\` for PDF conversion options.
 `;
 function safe(value) {
   return sanitizeTerminalLine(redactSensitiveText(value));
@@ -389,7 +389,7 @@ function parseArguments(arguments_) {
     return { ok: true, value: { kind: "clip", arguments: arguments_ } };
   }
   if (command === "init") {
-    let directory = "kb";
+    let directory = "info";
     let json = false;
     const positional = [];
     for (const argument of arguments_.slice(1)) {

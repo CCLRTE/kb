@@ -20,7 +20,7 @@ function packageManifest(name: string, version: string): string {
 describe("clip doctor", () => {
   test("reports pinned dependencies, derive-client, tools, browsers, and profile display names without probing secrets", async () => {
     const consumerRoot = "/repo";
-    const packageRoot = join(consumerRoot, "node_modules", "@cclrte", "kb");
+    const packageRoot = join(consumerRoot, "node_modules", "@cclrte", "info");
     const homeDirectory = "/Users/tester";
     const files = new Map<string, string>([
       [join(packageRoot, "package.json"), JSON.stringify({
@@ -152,8 +152,8 @@ describe("clip doctor", () => {
     expect(rendered).toContain("Cookie/keychain probe: not performed");
     expect(rendered).toContain("Install Google Chrome or Chromium for rendered capture");
     expect(rendered).toContain("Install yt-dlp");
-    expect(rendered).toContain("kb pdf requires both pdfinfo and pdftohtml");
-    expect(rendered).toContain("kb pdf still preserves native text and images without OCR");
+    expect(rendered).toContain("info pdf requires both pdfinfo and pdftohtml");
+    expect(rendered).toContain("info pdf still preserves native text and images without OCR");
   });
 
   test("discovers Chromium on Linux through an injected executable lookup", async () => {

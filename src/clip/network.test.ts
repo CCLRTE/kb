@@ -21,7 +21,7 @@ function fetchOptions(overrides: Partial<SafeFetchOptions> = {}): SafeFetchOptio
     timeoutMs: 1_000,
     maxBytes: 1_024,
     allowPrivateNetwork: false,
-    userAgent: "save-url-kb-network-test",
+    userAgent: "save-url-info-network-test",
     retries: 0,
     maxRedirects: 4,
     ...overrides,
